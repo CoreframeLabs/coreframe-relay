@@ -8,16 +8,18 @@
  * What the events were actually being used for is an audit trail, so that is what this
  * module provides. It is deliberately a thin seam with a stable signature:
  *
- *   RELAY-1 (now)  — writes a structured line via the logger. No database dependency,
- *                    so the dashboard boots before any Relay migration exists.
- *   RELAY-2 (next) — the `AuditLog` Prisma model lands and `persist()` below starts
- *                    writing rows. Not one call site changes.
+ *   RELAY-1 — wrote a structured log line. No database dependency, so the dashboard
+ *             booted before any Relay migration existed.
+ *   RELAY-2 — the `AuditLog` model landed and `persist()` now writes rows. Not one call
+ *             site changed, which is what the seam was for.
  *
- * Keeping the seam means the events are never silently dropped in the meantime: an
- * un-persisted audit event still appears in the logs, which is recoverable. Deleting the
+ * Keeping the seam meant the events were never silently dropped in between: an
+ * un-persisted audit event still appeared in the logs, which is recoverable. Deleting the
  * calls and "adding audit later" is how an audit trail ends up with a hole in it.
  */
 
+import { Prisma } from '@prisma/client';
+import { prisma } from '@/lib/prisma';
 import type { AppEvent } from 'types';
 
 /** Actor is nullable: some events (invitation accepted) are triggered by a non-member. */
@@ -30,28 +32,26 @@ export type AuditEvent = {
 };
 
 /**
- * Persist one audit event.
+ * Persist one audit event to the `AuditLog` table.
  *
- * RELAY-2 replaces the body with a `prisma.auditLog.create(...)`. The signature and the
- * failure contract below are the parts call sites depend on, so both are fixed now.
+ * [RELAY-2] swapped this body from a log line to a real row, exactly as [RELAY-1]
+ * planned. Not one call site changed — that was the point of the seam.
  */
 async function persist(entry: AuditEvent): Promise<void> {
-  // `auditEvent`, not `event`: spreading `entry` last would otherwise overwrite the log
-  // discriminator with the audited event name, and every audit line would be
-  // indistinguishable from any other log line at the same level.
-  // eslint-disable-next-line no-console
-  console.info(
-    JSON.stringify({
-      level: 'info',
-      event: 'audit.recorded',
-      ts: new Date().toISOString(),
+  await prisma.auditLog.create({
+    data: {
       teamId: entry.teamId,
-      auditEvent: entry.event,
-      actor: entry.actor ?? null,
+      // The column is a plain string, not an enum: audit events outlive the AppEvent
+      // union (route_created, payload_approved, …) and a migration should not be the
+      // cost of recording a new kind of event.
+      event: entry.event,
+      // "system" rather than null for machine-initiated events — the column is NOT NULL
+      // and an unattributed row is worse than an explicitly attributed one.
+      actor: entry.actor ?? 'system',
       target: entry.target ?? null,
-      metadata: entry.metadata ?? {},
-    })
-  );
+      metadata: (entry.metadata ?? {}) as Prisma.InputJsonValue,
+    },
+  });
 }
 
 /**

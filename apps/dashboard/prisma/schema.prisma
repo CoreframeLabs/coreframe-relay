@@ -83,6 +83,12 @@ model Team {
   invitations     Invitation[]
   apiKeys         ApiKey[]
 
+  // ── Relay [RELAY-2] ──
+  routes           Route[]
+  gateRules        GateRule[]
+  approvalRequests ApprovalRequest[]
+  auditLogs        AuditLog[]
+
   @@index([billingId])
 }
 
@@ -217,4 +223,202 @@ model jackson_ttl {
 
   @@index([expiresAt], map: "_jackson_ttl_expires_at")
   @@ignore
+}
+
+// ═══════════════════════════════════════════════════════════════════
+// RELAY — added in [RELAY-2] on top of the BoxyHQ base schema.
+// Source of truth: relay-boilerplate-integration.md Part 3.
+//
+// Three deliberate deviations from that spec, all index/type level. Rationale is
+// in the dev log; summarised at each site below.
+//   1. Timestamps are `@db.Timestamptz(6)`. Prisma's bare `DateTime` maps to
+//      `timestamp(3)` WITHOUT a timezone. Relay records when a webhook was
+//      received and delivered across regions — a naive timestamp makes latency
+//      and ordering wrong the moment anything runs outside UTC.
+//   2. Composite indexes replace some single-column ones. Every real query is
+//      "rows for THIS route/team, newest first"; equality column first, range
+//      column last, per the leftmost-prefix rule.
+//   3. The spec's `@@index([requestId])` on DeliveryLog is dropped — the field
+//      is already `@unique`, which creates that index. Declaring both builds and
+//      maintains a second identical index on a high-write table for nothing.
+// ═══════════════════════════════════════════════════════════════════
+
+enum RouteStatus {
+  ACTIVE
+  PAUSED
+  FAILING
+}
+
+enum DeliveryStatus {
+  QUEUED
+  DELIVERED
+  RETRYING
+  FAILED
+  DLQ
+}
+
+/// An inbound webhook endpoint. `slug` is the public URL segment:
+/// POST /in/:teamSlug/:routeSlug
+model Route {
+  id          String      @id @default(uuid())
+  teamId      String
+  name        String
+  slug        String
+  destination String
+  maxRetries  Int         @default(7)
+  status      RouteStatus @default(ACTIVE)
+  createdAt   DateTime    @default(now()) @db.Timestamptz(6)
+  updatedAt   DateTime    @updatedAt @db.Timestamptz(6)
+
+  team         Team          @relation(fields: [teamId], references: [id], onDelete: Cascade)
+  deliveryLogs DeliveryLog[]
+  dlqItems     DlqItem[]
+
+  // The unique constraint already indexes (teamId, slug), which covers the
+  // "list routes for a team" query by leftmost prefix. A bare @@index([teamId])
+  // would be redundant with it.
+  @@unique([teamId, slug])
+}
+
+/// Append-only record of one delivery attempt chain. The highest-write table in
+/// the system — one row per inbound webhook — so indexes here are kept to the
+/// ones that serve a real query.
+model DeliveryLog {
+  id           String         @id @default(uuid())
+  routeId      String
+  /// Value of the relay-request-id header. Unique, which is what makes retries
+  /// idempotent: a replayed QStash message hits this constraint instead of
+  /// double-writing.
+  requestId    String         @unique
+  sourceIp     String?
+  status       DeliveryStatus @default(QUEUED)
+  attemptCount Int            @default(0)
+  responseCode Int?
+  latencyMs    Int?
+  payloadSizeB Int?
+  createdAt    DateTime       @default(now()) @db.Timestamptz(6)
+  deliveredAt  DateTime?      @db.Timestamptz(6)
+
+  route Route @relation(fields: [routeId], references: [id], onDelete: Cascade)
+
+  /// Serves the log feed: one route, newest first. Replaces the spec's separate
+  /// @@index([routeId]) and @@index([createdAt]) — neither alone can answer it
+  /// without a bitmap combine or a sort.
+  @@index([routeId, createdAt(sort: Desc)])
+  /// Serves the status filter chips on the feed (Success / Retry / Failed).
+  @@index([routeId, status, createdAt(sort: Desc)])
+}
+
+/// A permanently failed delivery, retained for replay. Written rarely, read on
+/// one page, and reaped on a schedule.
+model DlqItem {
+  id           String    @id @default(uuid())
+  routeId      String
+  requestId    String
+  failReason   String
+  attemptCount Int
+  /// Stored inline only under 64KB; larger bodies go to object storage and this
+  /// stays null with `payloadKey` set.
+  payload      Json?
+  payloadKey   String?
+  /// Retention by tier: Free now+7d, Pro now+30d, Business now+90d.
+  expiresAt    DateTime  @db.Timestamptz(6)
+  retriedAt    DateTime? @db.Timestamptz(6)
+  createdAt    DateTime  @default(now()) @db.Timestamptz(6)
+
+  route Route @relation(fields: [routeId], references: [id], onDelete: Cascade)
+
+  /// The DLQ page: one route, newest first.
+  @@index([routeId, createdAt(sort: Desc)])
+  /// The retention reaper scans this alone, across all routes.
+  @@index([expiresAt])
+}
+
+// ─────────────────────────────────────────────────────────────────
+// RELAY: GATE (Phase 2 — models land now so one migration covers it)
+// ─────────────────────────────────────────────────────────────────
+
+enum RiskLevel {
+  LOW
+  MEDIUM
+  HIGH
+}
+
+enum ApprovalStatus {
+  PENDING
+  APPROVED
+  REJECTED
+  TIMED_OUT
+}
+
+model GateRule {
+  id          String    @id @default(uuid())
+  teamId      String
+  name        String
+  description String?
+  /// e.g. { field: "amount", op: "gt", value: 100 }
+  condition   Json
+  riskLevel   RiskLevel @default(MEDIUM)
+  timeoutMins Int       @default(60)
+  active      Boolean   @default(true)
+  createdAt   DateTime  @default(now()) @db.Timestamptz(6)
+  updatedAt   DateTime  @updatedAt @db.Timestamptz(6)
+
+  team             Team              @relation(fields: [teamId], references: [id], onDelete: Cascade)
+  approvalRequests ApprovalRequest[]
+
+  /// Rule evaluation loads the ACTIVE rules for one team and sits in the hot path
+  /// of every gated webhook. Composite, equality-only — a true partial index
+  /// (WHERE active) would be tighter, but Prisma cannot declare one, so that would
+  /// have to be hand-written into the migration and would then drift from schema.
+  @@index([teamId, active])
+}
+
+model ApprovalRequest {
+  id           String         @id @default(uuid())
+  teamId       String
+  gateRuleId   String
+  requestId    String         @unique
+  payload      Json
+  status       ApprovalStatus @default(PENDING)
+  riskLevel    RiskLevel
+  approvedBy   String?
+  rejectedBy   String?
+  resolvedAt   DateTime?      @db.Timestamptz(6)
+  expiresAt    DateTime       @db.Timestamptz(6)
+  /// Correlates back to the Inngest run that is waiting on this decision.
+  inngestRunId String?
+  createdAt    DateTime       @default(now()) @db.Timestamptz(6)
+
+  team     Team     @relation(fields: [teamId], references: [id], onDelete: Cascade)
+  gateRule GateRule @relation(fields: [gateRuleId], references: [id])
+
+  /// The approvals inbox: one team, filtered by status, newest first.
+  @@index([teamId, status, createdAt(sort: Desc)])
+  /// The timeout sweeper.
+  @@index([expiresAt])
+  @@index([gateRuleId])
+}
+
+// ─────────────────────────────────────────────────────────────────
+// RELAY: AUDIT LOG — replaces Retraced, and the backing store for
+// lib/audit.ts, whose recordAuditEvent() has been logging since [RELAY-1].
+// ─────────────────────────────────────────────────────────────────
+
+model AuditLog {
+  id        String   @id @default(uuid())
+  teamId    String
+  /// User email, or "system" for machine-initiated events.
+  actor     String
+  /// e.g. "route_created", "payload_approved".
+  event     String
+  /// e.g. a route id or a request id.
+  target    String?
+  metadata  Json?
+  createdAt DateTime @default(now()) @db.Timestamptz(6)
+
+  team Team @relation(fields: [teamId], references: [id], onDelete: Cascade)
+
+  @@index([teamId, createdAt(sort: Desc)])
+  @@index([teamId, event, createdAt(sort: Desc)])
 }

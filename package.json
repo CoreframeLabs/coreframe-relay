@@ -16,6 +16,7 @@
     "test:security": "turbo run test:security"
   },
   "devDependencies": {
+    "supabase": "^2.111.0",
     "turbo": "^2.3.3"
   }
 }
