@@ -1,0 +1,166 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  color-scheme: dark light;
+}
+
+html,
+body {
+  padding: 0;
+  margin: 0;
+  font-family:
+    -apple-system,
+    BlinkMacSystemFont,
+    Segoe UI,
+    Roboto,
+    Oxygen,
+    Ubuntu,
+    Cantarell,
+    Fira Sans,
+    Droid Sans,
+    Helvetica Neue,
+    sans-serif;
+}
+
+a {
+  color: inherit;
+  text-decoration: none;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+@layer base {
+  input:not([type='checkbox']):not([type='radio']),
+  textarea {
+    @apply rounded !important;
+  }
+}
+
+@layer components {
+  #__next {
+    @apply h-full;
+  }
+
+  .btn {
+    @apply rounded normal-case;
+  }
+
+  .modal-box {
+    @apply rounded;
+  }
+
+  .btn-primary:focus-visible {
+    @apply outline-primary;
+  }
+
+  .btn-error:focus-visible {
+    @apply outline-error;
+  }
+}
+
+.btn-md {
+  @apply min-h-8 h-10;
+}
+
+.scrollbar {
+  scrollbar-width: thin;
+  scrollbar-color: #555555 #f0f0f0;
+}
+
+.scrollbar::-webkit-scrollbar {
+  width: 8px;
+}
+
+.scrollbar::-webkit-scrollbar-thumb {
+  background-color: #555555;
+}
+
+.scrollbar::-webkit-scrollbar-track {
+  background-color: #f0f0f0;
+}
+
+.scrollbar::-webkit-scrollbar-button {
+  display: none;
+}
+
+/* ─────────────────────────────────────────────────────────────────────────────
+ * shadcn/ui — zinc base, CSS variables. Added in [RELAY-1].
+ *
+ * These coexist with daisyUI rather than replacing it. Per
+ * relay-boilerplate-integration.md Part 7 the migration is progressive, not
+ * big-bang: every NEW Relay page is built with shadcn/ui, and the existing
+ * BoxyHQ pages keep their daisyUI look until they are migrated during normal
+ * feature work.
+ *
+ * DELIBERATE OMISSION: the stock shadcn install also emits
+ *   @layer base { * { @apply border-border } body { @apply bg-background text-foreground } }
+ * That global reset is exactly the big-bang the guide warns against — it would
+ * restyle every existing BoxyHQ page the moment it landed. The variables are
+ * defined here so shadcn components resolve correctly; opting a page in is done
+ * by putting `bg-background text-foreground` on that page's own wrapper.
+ *
+ * No name collision with daisyUI: daisyUI 4 uses --p/--b1/--bc, these use
+ * semantic names. Verified by grep before adding.
+ * ──────────────────────────────────────────────────────────────────────────── */
+@layer base {
+  :root {
+    --background: 0 0% 100%;
+    --foreground: 240 10% 3.9%;
+    --card: 0 0% 100%;
+    --card-foreground: 240 10% 3.9%;
+    --popover: 0 0% 100%;
+    --popover-foreground: 240 10% 3.9%;
+    --primary: 240 5.9% 10%;
+    --primary-foreground: 0 0% 98%;
+    --secondary: 240 4.8% 95.9%;
+    --secondary-foreground: 240 5.9% 10%;
+    --muted: 240 4.8% 95.9%;
+    --muted-foreground: 240 3.8% 46.1%;
+    --accent: 240 4.8% 95.9%;
+    --accent-foreground: 240 5.9% 10%;
+    --destructive: 0 84.2% 60.2%;
+    --destructive-foreground: 0 0% 98%;
+    --border: 240 5.9% 90%;
+    --input: 240 5.9% 90%;
+    --ring: 240 5.9% 10%;
+    --radius: 0.5rem;
+    --chart-1: 12 76% 61%;
+    --chart-2: 173 58% 39%;
+    --chart-3: 197 37% 24%;
+    --chart-4: 43 74% 66%;
+    --chart-5: 27 87% 67%;
+  }
+
+  /* Relay's own surfaces are dark-first (relay-ui-ux-spec.md). BoxyHQ already
+   * toggles `class="dark"`, so this hooks straight into the existing switch. */
+  .dark {
+    --background: 240 10% 3.9%;
+    --foreground: 0 0% 98%;
+    --card: 240 10% 3.9%;
+    --card-foreground: 0 0% 98%;
+    --popover: 240 10% 3.9%;
+    --popover-foreground: 0 0% 98%;
+    --primary: 0 0% 98%;
+    --primary-foreground: 240 5.9% 10%;
+    --secondary: 240 3.7% 15.9%;
+    --secondary-foreground: 0 0% 98%;
+    --muted: 240 3.7% 15.9%;
+    --muted-foreground: 240 5% 64.9%;
+    --accent: 240 3.7% 15.9%;
+    --accent-foreground: 0 0% 98%;
+    --destructive: 0 62.8% 30.6%;
+    --destructive-foreground: 0 0% 98%;
+    --border: 240 3.7% 15.9%;
+    --input: 240 3.7% 15.9%;
+    --ring: 240 4.9% 83.9%;
+    --chart-1: 220 70% 50%;
+    --chart-2: 160 60% 45%;
+    --chart-3: 30 80% 55%;
+    --chart-4: 280 65% 60%;
+    --chart-5: 340 75% 55%;
+  }
+}
