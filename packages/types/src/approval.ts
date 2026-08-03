@@ -1,5 +1,5 @@
 import { z } from 'zod';
-import { RequestIdSchema } from './delivery.js';
+import { RequestIdSchema } from './delivery';
 
 /** Mirrors the `RiskLevel` and `ApprovalStatus` enums in prisma/schema.prisma. */
 export const RiskLevelSchema = z.enum(['LOW', 'MEDIUM', 'HIGH']);

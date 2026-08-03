@@ -9,7 +9,7 @@
  * `type` for a domain object. Derive it from the Zod schema — the schema IS the
  * documentation, and it is the only version that also validates at runtime.
  */
-export * from './route.js';
-export * from './delivery.js';
-export * from './dlq.js';
-export * from './approval.js';
+export * from './route';
+export * from './delivery';
+export * from './dlq';
+export * from './approval';

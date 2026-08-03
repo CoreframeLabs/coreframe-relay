@@ -1,5 +1,5 @@
 import { z } from 'zod';
-import { RequestIdSchema } from './delivery.js';
+import { RequestIdSchema } from './delivery';
 
 /** Payloads at or above this size are offloaded rather than stored inline. */
 export const MAX_INLINE_PAYLOAD_BYTES = 64 * 1024;

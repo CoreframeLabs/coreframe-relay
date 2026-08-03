@@ -4,6 +4,11 @@ const { withSentryConfig } = require('@sentry/nextjs');
 
 /** @type {import('next').NextConfig} */
 const nextConfig = {
+  // `@coreframe-relay/types` ships TypeScript source, not a build artifact — it is the
+  // shared contract, and a build step between editing a schema and seeing it in both apps
+  // is exactly the drift the package exists to prevent. Next must therefore compile it.
+  transpilePackages: ['@coreframe-relay/types'],
+
   reactStrictMode: true,
   images: {
     remotePatterns: [

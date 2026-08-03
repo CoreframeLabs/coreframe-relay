@@ -52,10 +52,20 @@ export type AppEvent =
   | 'apikey.removed'
   | 'apikey.fetched'
   | 'apikey.removed'
+  // The `webhook.*` events are BoxyHQ's outbound-webhook feature, which [RELAY-1]
+  // removed — Relay IS the webhook layer. Kept only because `AppEvent` is a
+  // closed union other BoxyHQ code still references; nothing emits them.
   | 'webhook.created'
   | 'webhook.removed'
   | 'webhook.fetched'
-  | 'webhook.updated';
+  | 'webhook.updated'
+  // ── Relay [RELAY-6] ──
+  | 'route.created'
+  | 'route.fetched'
+  | 'route.updated'
+  | 'route.removed'
+  | 'route.paused'
+  | 'route.resumed';
 
 export type AUTH_PROVIDER =
   | 'github'
