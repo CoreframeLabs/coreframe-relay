@@ -155,14 +155,23 @@ export function RoutesTable({
                 const sortable = header.column.getCanSort();
                 const dir = header.column.getIsSorted();
                 return (
-                  <TableHead key={header.id}>
+                  <TableHead
+                    key={header.id}
+                    // aria-sort belongs on the columnheader, NOT on the button inside it —
+                    // `button` does not support the attribute, so putting it there
+                    // communicates nothing to a screen reader while looking correct.
+                    aria-sort={
+                      !sortable ? undefined
+                        : dir === 'asc' ? 'ascending'
+                        : dir === 'desc' ? 'descending'
+                        : 'none'
+                    }
+                  >
                     {sortable ? (
                       <button
                         type="button"
                         onClick={header.column.getToggleSortingHandler()}
                         className="inline-flex items-center gap-1 hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-                        // Communicates sort state to screen readers, which the caret alone does not.
-                        aria-sort={dir === 'asc' ? 'ascending' : dir === 'desc' ? 'descending' : 'none'}
                       >
                         {flexRender(header.column.columnDef.header, header.getContext())}
                         <span aria-hidden="true" className="text-xs opacity-60">

@@ -1,7 +1,7 @@
 import { Hono } from 'hono';
 import { HTTPException } from 'hono/http-exception';
 import { health } from './routes/health.js';
-import { requestId, REQUEST_ID_HEADER } from './middleware/requestId.js';
+import { requestId } from './middleware/requestId.js';
 import type { AppEnv } from './types/bindings.js';
 
 /**

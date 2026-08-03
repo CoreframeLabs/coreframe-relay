@@ -2,7 +2,6 @@ import {
   Cog6ToothIcon,
   DocumentMagnifyingGlassIcon,
   KeyIcon,
-  PaperAirplaneIcon,
   ShieldExclamationIcon,
   UserPlusIcon,
   BanknotesIcon,

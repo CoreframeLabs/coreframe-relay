@@ -1,0 +1,228 @@
+# Coreframe Relay — CI
+#
+# See docs/ci.md for the full explanation of every decision in this file: which
+# jobs gate merges, which secrets must exist before it goes green, and what was
+# verified locally vs. reasoned about (GitHub Actions cannot be run from this repo
+# checkout, so nothing in this file has been executed end-to-end).
+#
+# Scripts referenced below were checked against the actual package.json files in
+# apps/dashboard, apps/proxy, and packages/types before being wired in here —
+# not assumed from the engineering-standards sketch.
+
+name: CI
+
+on:
+  pull_request:
+    branches: [main]
+  push:
+    branches: [main]
+  workflow_dispatch: {}
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+env:
+  NODE_VERSION: '20' # matches "engines.node": ">=20.0.0" in package.json
+
+jobs:
+  # ── Lint ───────────────────────────────────────────────────────────────────
+  # Only apps/dashboard has a lint script ("check-lint" → eslint). apps/proxy and
+  # packages/types have no eslint config at all, and the root "lint" script
+  # (turbo run lint) is a silent no-op because no workspace defines a task
+  # literally named "lint" — so it is deliberately NOT used here. See docs/ci.md.
+  lint:
+    name: Lint (dashboard)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4 # version resolved from packageManager in package.json
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: pnpm
+
+      - run: pnpm install --frozen-lockfile
+
+      - name: dashboard check-lint (eslint)
+        run: pnpm --filter @coreframe-relay/dashboard check-lint
+
+  # ── Typecheck ──────────────────────────────────────────────────────────────
+  # Runs the *actual* root "check-types" script (turbo run check-types), which is
+  # correctly wired to all three workspaces. apps/dashboard's tsc run needs a
+  # generated Prisma Client to resolve @prisma/client types, and `prisma generate`
+  # needs DATABASE_URL to be set to parse schema.prisma — it does not need a
+  # reachable database (verified locally: generate succeeds against a Postgres
+  # that isn't even running). A Postgres service container is still provided so
+  # this job has a real, working DATABASE_URL and so a future `prisma db push` /
+  # migrate step can be added without inventing a second CI setup.
+  typecheck:
+    name: Typecheck
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: relay_ci
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+    env:
+      DATABASE_URL: postgresql://postgres:postgres@localhost:5432/relay_ci
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: pnpm
+
+      - run: pnpm install --frozen-lockfile
+
+      - name: Generate Prisma Client (dashboard)
+        run: pnpm --filter @coreframe-relay/dashboard exec prisma generate
+
+      - name: check-types (dashboard, proxy, types)
+        run: pnpm check-types
+
+  # ── Unit / integration tests ──────────────────────────────────────────────
+  # Root "test" (turbo run test) covers apps/proxy's Vitest suite (the 33 tests
+  # required by the ticket) and apps/dashboard's Jest suite. packages/types has
+  # no test script and is silently skipped by turbo, which is correct.
+  #
+  # No database service here: the current dashboard Jest suite was verified
+  # locally to pass with no DATABASE_URL and no .env file present at all. If
+  # future dashboard tests touch Prisma-backed code this job will need the same
+  # postgres service the typecheck job uses above.
+  test:
+    name: Unit tests (Vitest + Jest)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: pnpm
+
+      - run: pnpm install --frozen-lockfile
+
+      - run: pnpm test
+
+  # ── Secret scanning ────────────────────────────────────────────────────────
+  # Requires full git history (fetch-depth: 0) so Gitleaks can scan past commits,
+  # not just the current tree.
+  secret-scan:
+    name: Gitleaks
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - uses: gitleaks/gitleaks-action@v2
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GITLEAKS_LICENSE: ${{ secrets.GITLEAKS_LICENSE }}
+
+  # ── SAST ───────────────────────────────────────────────────────────────────
+  # Uses the official semgrep/semgrep container directly and `semgrep scan
+  # --error`, NOT the semgrep/semgrep-action Marketplace wrapper the engineering
+  # standards doc sketches — that wrapper is deprecated upstream in favor of
+  # calling the CLI/container directly. This also avoids requiring
+  # SEMGREP_APP_TOKEN: that token is only needed for `semgrep ci` (Semgrep Cloud
+  # Platform login, diff-aware scanning, PR comments) — `semgrep scan --error`
+  # runs the same rulesets standalone and exits non-zero on findings, no login
+  # required. See docs/ci.md for the reasoning and how to upgrade to `semgrep ci`
+  # later if the team provisions SEMGREP_APP_TOKEN.
+  sast:
+    name: Semgrep
+    runs-on: ubuntu-latest
+    container:
+      image: semgrep/semgrep
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: semgrep scan
+        run: |
+          semgrep scan \
+            --config p/typescript \
+            --config p/nextjs \
+            --config p/owasp-top-ten \
+            --config p/secrets \
+            --error \
+            --metrics=off \
+            .
+
+  # ── Dependency / vulnerability scanning ────────────────────────────────────
+  # The security-testing-plan sketch uses `npm audit`, but this repo is a pnpm
+  # workspace with no package-lock.json — `pnpm audit` is the real equivalent
+  # here. Trivy's filesystem scan is the second, independent check and is what
+  # directly satisfies "pipeline fails on HIGH/CRITICAL vulnerabilities": both
+  # steps gate on HIGH/CRITICAL severity.
+  dependency-audit:
+    name: pnpm audit + Trivy
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: pnpm
+
+      - run: pnpm install --frozen-lockfile
+
+      - name: pnpm audit (HIGH/CRITICAL)
+        run: pnpm audit --audit-level high
+
+      - name: Trivy filesystem scan (HIGH/CRITICAL)
+        uses: aquasecurity/trivy-action@0.36.0
+        with:
+          scan-type: fs
+          scan-ref: .
+          severity: HIGH,CRITICAL
+          exit-code: '1'
+          skip-dirs: node_modules
+
+  # ── Required-check aggregator ──────────────────────────────────────────────
+  # One job to point GitHub branch protection at, instead of six. Add
+  # "ci-required" (not the six individual job names) as the required status
+  # check in Settings → Branches → Branch protection rules for `main`.
+  ci-required:
+    name: CI required checks
+    runs-on: ubuntu-latest
+    if: always()
+    needs:
+      - lint
+      - typecheck
+      - test
+      - secret-scan
+      - sast
+      - dependency-audit
+    steps:
+      - name: Fail if any required job failed or was cancelled
+        run: |
+          echo '${{ toJSON(needs) }}'
+          if [[ "${{ contains(needs.*.result, 'failure') }}" == "true" || "${{ contains(needs.*.result, 'cancelled') }}" == "true" ]]; then
+            echo "One or more required CI jobs failed."
+            exit 1
+          fi
+          echo "All required CI jobs passed."
