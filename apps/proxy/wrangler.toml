@@ -1,0 +1,31 @@
+name = "coreframe-relay-proxy"
+main = "src/index.ts"
+# Pinned, not floating. Workers runtime behaviour changes with this date, and a proxy that
+# silently changes behaviour on redeploy is the opposite of what this service is for.
+compatibility_date = "2026-05-01"
+compatibility_flags = ["nodejs_compat"]
+
+[observability]
+enabled = true
+
+[vars]
+ENVIRONMENT = "development"
+# Real values are wrangler SECRETS, never vars, and never committed:
+#   wrangler secret put RELAY_API_SECRET
+#   wrangler secret put UPSTASH_QSTASH_TOKEN
+# Local dev reads them from .dev.vars, which is gitignored.
+
+[env.production]
+name = "coreframe-relay-proxy"
+vars = { ENVIRONMENT = "production" }
+
+[env.staging]
+name = "coreframe-relay-proxy-staging"
+vars = { ENVIRONMENT = "staging" }
+
+# KV for idempotency keys and rate-limit counters ([RELAY-4]). Declared but not yet
+# bound — `wrangler kv namespace create` issues the ids, and inventing one here would
+# produce a config that looks complete and fails at deploy.
+# [[kv_namespaces]]
+# binding = "RELAY_KV"
+# id = "<issued by: wrangler kv namespace create RELAY_KV>"

@@ -1,0 +1,20 @@
+{
+  "compilerOptions": {
+    "target": "ES2022",
+    // DOM is here for the WHATWG globals only — `URL` in route.ts. It is a lib (types)
+    // entry with no runtime effect, and URL/URLSearchParams exist in every environment
+    // this package targets: Node 20+, Cloudflare Workers, and the browser.
+    "lib": ["ES2022", "DOM"],
+    "module": "ESNext",
+    "moduleResolution": "bundler",
+    "strict": true,
+    "noUncheckedIndexedAccess": true,
+    "noImplicitOverride": true,
+    "declaration": true,
+    "skipLibCheck": true,
+    "noEmit": true,
+    "isolatedModules": true,
+    "verbatimModuleSyntax": true
+  },
+  "include": ["src/**/*.ts"]
+}
