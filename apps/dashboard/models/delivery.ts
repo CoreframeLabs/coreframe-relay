@@ -151,3 +151,93 @@ export async function fetchDeliveries(
     take,
   });
 }
+
+/* ────────────────────────────────────────────────────────────────────────────
+ * The live delivery feed. [RELAY-7]
+ * ──────────────────────────────────────────────────────────────────────────── */
+
+/**
+ * The hard ceiling on how many rows the feed ever holds, server or client.
+ *
+ * It is exported rather than written as a literal in three places because it is a
+ * contract between the query, the SSE stream's diff window and the client's list — if
+ * they disagree, the stream emits rows the list silently drops and a delivery appears to
+ * have vanished.
+ */
+export const DELIVERY_FEED_MAX_ROWS = 200;
+
+/**
+ * The feed's response contract, pinned as an explicit `select`.
+ *
+ * Same reasoning as `fetchRouteBySlugs`: what a query returns is an API surface, and
+ * `include: { route: true }` would ship the destination URL, the team id and the retry
+ * policy of every route to the browser as a side effect of wanting its name. Adding a
+ * column to `DeliveryLog` later must not silently widen what this page sends.
+ */
+const feedSelect = {
+  id: true,
+  requestId: true,
+  status: true,
+  attemptCount: true,
+  responseCode: true,
+  latencyMs: true,
+  payloadSizeB: true,
+  sourceIp: true,
+  createdAt: true,
+  deliveredAt: true,
+  route: { select: { id: true, name: true, slug: true } },
+} as const;
+
+/** One row of the delivery feed, exactly as `feedSelect` returns it. */
+export type DeliveryFeedRow = {
+  id: string;
+  requestId: string;
+  status: DeliveryStatus;
+  attemptCount: number;
+  responseCode: number | null;
+  latencyMs: number | null;
+  payloadSizeB: number | null;
+  sourceIp: string | null;
+  createdAt: Date;
+  deliveredAt: Date | null;
+  route: { id: string; name: string; slug: string };
+};
+
+export type DeliveryFeedFilter = {
+  routeId?: string;
+  status?: DeliveryStatus;
+};
+
+/**
+ * The whole team's deliveries across every route, newest first.
+ *
+ * **The route filter is nested inside the `route` relation deliberately.** Written the
+ * obvious way — `where: { routeId, route: { teamId } }` — it is still correct, but this
+ * form makes the coupling impossible to separate by accident: a caller cannot narrow to a
+ * route without the team predicate travelling with it in the same object. A `routeId`
+ * belonging to another team therefore matches nothing rather than leaking a row, which
+ * matters because the route filter on the feed comes from a query string.
+ *
+ * The sort is `(createdAt DESC, id DESC)`, not `createdAt` alone. Ties are real here —
+ * `createdAt` is `timestamptz(6)` and a burst of webhooks can share a microsecond — and an
+ * unstable sort means the "top 200" window shuffles between polls, which the stream's diff
+ * would then report as rows appearing and disappearing.
+ */
+export async function fetchTeamDeliveryFeed(
+  teamId: string,
+  filter: DeliveryFeedFilter = {},
+  take: number = DELIVERY_FEED_MAX_ROWS
+): Promise<DeliveryFeedRow[]> {
+  return prisma.deliveryLog.findMany({
+    where: {
+      route: {
+        teamId,
+        ...(filter.routeId ? { id: filter.routeId } : {}),
+      },
+      ...(filter.status ? { status: filter.status } : {}),
+    },
+    select: feedSelect,
+    orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
+    take: Math.min(Math.max(take, 1), DELIVERY_FEED_MAX_ROWS),
+  });
+}
