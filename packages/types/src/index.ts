@@ -13,3 +13,7 @@ export * from './route';
 export * from './delivery';
 export * from './dlq';
 export * from './approval';
+// The proxy↔dashboard internal contract. Exported here so both apps import it as
+// `@coreframe-relay/types` rather than by relative path across an app boundary — the
+// package's `exports` map only exposes `"."`, so a subpath import does not resolve.
+export * from './internal';
