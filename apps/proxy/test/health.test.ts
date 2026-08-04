@@ -17,7 +17,7 @@ type HealthBody = {
   service: string;
   environment: string;
   requestId: string;
-  configured: { relayApiSecret: boolean; qstash: boolean; kv: boolean };
+  configured: { relayApiSecret: boolean; qstash: boolean; kv: boolean; dashboard: boolean };
 };
 const json = async <T>(res: Response): Promise<T> => (await res.json()) as T;
 
@@ -41,6 +41,7 @@ describe('GET /health', () => {
       relayApiSecret: true,
       qstash: false,
       kv: false,
+      dashboard: false,
     });
     // The real assertion: a health endpoint that echoes even a prefix of a token is a
     // credential oracle.

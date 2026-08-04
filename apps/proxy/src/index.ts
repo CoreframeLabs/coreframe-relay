@@ -1,6 +1,7 @@
 import { Hono } from 'hono';
 import { HTTPException } from 'hono/http-exception';
 import { health } from './routes/health.js';
+import { ingest } from './routes/ingest.js';
 import { requestId } from './middleware/requestId.js';
 import type { AppEnv } from './types/bindings.js';
 
@@ -11,9 +12,9 @@ import type { AppEnv } from './types/bindings.js';
  * in single-digit milliseconds with no cold start, which is what a Cloudflare Worker gives
  * and a serverless Next.js function does not.
  *
- * [RELAY-3] is the skeleton only — bindings, request ids, error handling, /health.
- * Ingestion (`POST /in/:teamSlug/:routeSlug`), the SSRF validator and the QStash publish
- * are [RELAY-4].
+ * [RELAY-3] is the skeleton — bindings, request ids, error handling, /health.
+ * [RELAY-4] adds ingestion: `POST /in/:teamSlug/:routeSlug`, authenticated, SSRF-checked
+ * and published to QStash.
  */
 const app = new Hono<AppEnv>();
 
@@ -21,6 +22,7 @@ const app = new Hono<AppEnv>();
 app.use('*', requestId);
 
 app.route('/health', health);
+app.route('/in', ingest);
 
 /**
  * Global error handler.

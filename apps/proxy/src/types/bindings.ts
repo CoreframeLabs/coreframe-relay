@@ -10,6 +10,12 @@ export type Bindings = {
   ENVIRONMENT: 'development' | 'staging' | 'production';
   /** Shared with the dashboard; authenticates inbound requests. Min 32 chars. */
   RELAY_API_SECRET?: string;
+  /**
+   * Origin of the Next.js dashboard — the route-lookup endpoint the Worker reads its
+   * config from, and the origin of the QStash consumer callback. `http://localhost:4002`
+   * in local development.
+   */
+  RELAY_DASHBOARD_URL?: string;
   UPSTASH_QSTASH_URL?: string;
   UPSTASH_QSTASH_TOKEN?: string;
   /** Idempotency keys and rate-limit counters ([RELAY-4]). */
