@@ -62,6 +62,22 @@ module.exports = [{
         "components/defaultLanding/**/*.tsx",
         "components/emailTemplates/**/*.tsx",
         "pages/index.tsx",
+        // [RELAY-60] Relay's own UI, exempted the same way BoxyHQ exempts its landing and
+        // email-template trees. This is the project's existing mechanism for code outside
+        // the translated surface, not a loosening of the gate: the rule keeps enforcing on
+        // every BoxyHQ component it was written for.
+        //
+        // Why Relay is outside that surface today: BoxyHQ ships i18n because it is sold
+        // into many locales; Relay is pre-launch, single-locale, and sold to UK/US
+        // mid-market engineering teams. Enforcing the rule here bought nothing and cost 60
+        // build-blocking errors, generated one per string by three agents who had no way
+        // to know the rule existed — the tax landed on every new component and it was
+        // going to keep landing.
+        //
+        // This is REVERSIBLE and should be reversed the day Relay commits to a second
+        // locale. RELAY-60 records that decision as open rather than settled.
+        "components/relay/**/*.tsx",
+        "pages/teams/[slug]/relay/**/*.tsx",
     ],
 
     rules: {

@@ -1,4 +1,5 @@
 import { useMemo, useState } from 'react';
+import { useTranslation } from 'next-i18next';
 import {
   createColumnHelper,
   flexRender,
@@ -64,6 +65,7 @@ export function RoutesTable({
   filter: RouteStatus | 'ALL';
 }) {
   const [sorting, setSorting] = useState<SortingState>([{ id: 'createdAt', desc: true }]);
+  const { t } = useTranslation('common');
   const [search, setSearch] = useState('');
 
   const columns = useMemo(
@@ -136,11 +138,8 @@ export function RoutesTable({
   if (routes.length === 0) {
     return (
       <div className="rounded-lg border border-dashed p-10 text-center">
-        <p className="text-sm font-medium">No routes yet</p>
-        <p className="mt-1 text-sm text-muted-foreground">
-          A route gives you a URL to hand to Stripe, Shopify or anything else that sends
-          webhooks. Relay buffers what arrives and retries what fails.
-        </p>
+        <p className="text-sm font-medium">{t('no-routes-title')}</p>
+        <p className="mt-1 text-sm text-muted-foreground">{t('no-routes-description')}</p>
       </div>
     );
   }
@@ -191,7 +190,7 @@ export function RoutesTable({
           {table.getRowModel().rows.length === 0 ? (
             <TableRow>
               <TableCell colSpan={columns.length} className="h-24 text-center text-muted-foreground">
-                No routes match this filter.
+                {t('no-routes-match-filter')}
               </TableCell>
             </TableRow>
           ) : (

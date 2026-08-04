@@ -57,6 +57,12 @@ const DialogContent = React.forwardRef<
       {children as React.ReactNode}
       <DialogPrimitive.Close className="absolute right-4 top-4 rounded-sm opacity-70 ring-offset-background transition-opacity hover:opacity-100 focus:outline-none focus:ring-2 focus:ring-ring focus:ring-offset-2 disabled:pointer-events-none data-[state=open]:bg-accent data-[state=open]:text-muted-foreground">
         <X className="h-4 w-4" />
+        {/* eslint-disable-next-line i18next/no-literal-string --
+        Generated shadcn primitive. Adding a `useTranslation` call here would put an
+        app-level i18n dependency inside a UI primitive AND become one more hand edit
+        that regenerating this component silently destroys — the recurring tax
+        RELAY-19 exists to remove. Translated copy belongs in the components that use
+        this dialog, which is where BoxyHQ puts it. */}
         <span className="sr-only">Close</span>
       </DialogPrimitive.Close>
     </DialogPrimitive.Content>

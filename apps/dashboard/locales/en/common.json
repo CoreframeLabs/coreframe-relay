@@ -246,5 +246,8 @@
   "internal-server-error": "Internal Server Error !",
   "unable-to-find": "We're unable to find out what's happening! We suggest you to",
   "try-again-later": "or visit here later.",
-  "multiple-sso-teams": "User belongs to multiple teams with SSO enabled. Please enter your team slug to get started."
+  "multiple-sso-teams": "User belongs to multiple teams with SSO enabled. Please enter your team slug to get started.",
+  "no-routes-title": "No routes yet",
+  "no-routes-description": "A route gives you a URL to hand to Stripe, Shopify or anything else that sends webhooks. Relay buffers what arrives and retries what fails.",
+  "no-routes-match-filter": "No routes match this filter."
 }
