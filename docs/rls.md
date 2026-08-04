@@ -193,3 +193,222 @@ together, none of which are safe to do inside a SQL-migrations-only ticket:
 Until all three land, RLS on these six tables is a real, verified backstop
 against direct/PostgREST/non-`postgres`-role access, and a no-op against the
 app's actual Prisma traffic.
+
+---
+
+# RELAY-39: wiring the app onto `relay_app` so the policies above are not inert
+
+Migration: `supabase/migrations/20260804120000_relay_app_login_and_grants.sql`
+Code: `apps/dashboard/lib/db/scope.ts`, `lib/db/scoped-client.ts`, `lib/prisma.ts`
+Tests: `apps/dashboard/__tests__/lib/rls.spec.ts`
+
+Everything above this line describes the state RELAY-11 left: correct policies,
+zero effect on the app. This section is the fix, and what it did and did not
+close. Dated 2026-08-04/05.
+
+## The one-sentence answer
+
+The mechanism works and is proven on the hosted transaction pooler — **12 of 12
+assertions pass as `relay_app`, including a 60-way concurrent isolation test** —
+but `DATABASE_URL` has **deliberately NOT been flipped**, because doing so
+without wiring `withTeamScope` into the request path would take every Relay
+feature to zero rows. The remaining step is named precisely below.
+
+## What changed in the database
+
+`relay_app` was `NOLOGIN` with grants on 6 of 22 tables. Both were blockers:
+
+* **Grants.** Measured: `public` holds 22 base tables; `relay_app` had grants on
+  6. Repointing `DATABASE_URL` in that state kills NextAuth on the first
+  `Session` read, long before any Relay query runs. The migration grants
+  `SELECT/INSERT/UPDATE/DELETE` on all tables plus `USAGE, SELECT` on both
+  sequences (`PasswordReset_id_seq`, `jackson_index_id_seq`), and sets
+  `ALTER DEFAULT PRIVILEGES` so tables created by future `prisma migrate deploy`
+  runs are not silently invisible.
+* **LOGIN.** Granted in the migration. The **password is not in git** — generated
+  with `openssl rand -base64 36` (40 chars, alphanumeric) and applied by hand
+  with `ALTER ROLE relay_app WITH PASSWORD …` on local, staging and production.
+
+Two things the migration deliberately does not do: it grants **no DDL** (so
+`prisma db push` / `migrate deploy` fail loudly if ever pointed at the runtime
+credential — this is RELAY-41's "migration role is NOT relay_app" criterion), and
+it does **not** restate `NOSUPERUSER`/`NOBYPASSRLS`. Measured: `postgres` on both
+Supabase stacks holds `CREATEROLE`, not `SUPERUSER`, and `CREATEROLE` may not set
+the `SUPERUSER` or `BYPASSRLS` attributes even to the values they already have —
+naming them fails the whole migration with `permission denied to alter role
+(SQLSTATE 42501)`. The DO block at the end therefore *verifies* those attributes
+instead of imposing them, and the test suite asserts the same three facts against
+the live connection.
+
+## Supavisor accepts a custom role — verified, not assumed
+
+Supabase's pooler derives its tenant from the username, so it was an open
+question whether a non-`postgres` role could connect at all. It can, as
+`<role>.<project_ref>`. Verified on production, both ports:
+
+```
+port 5432 (session mode)     -> relay_app | rolbypassrls=f
+port 6543 (transaction mode) -> relay_app | rolbypassrls=f
+```
+
+## The measurement that dictated the design
+
+A plain `SET` and a `SET LOCAL` look interchangeable in code review. They are
+not, and on a transaction-mode pooler the difference is a cross-tenant read.
+Same test, same project (staging `ghusprhbptdmdqgyjepf`), both ports:
+
+| | one client does `SET app.current_team_id='LEAKED'`, disconnects; 6 fresh clients then read |
+|---|---|
+| **session mode `:5432`** | 0 of 6 saw it |
+| **transaction mode `:6543`** | **6 of 6 saw it** |
+
+Reproduced independently on production (`:6543`): 5 of 5 fresh connections read
+back a value set by a client that had already disconnected. In transaction mode
+a session-level `SET` is pinned to the pooled **server** connection, outlives the
+client that set it, and is handed to whoever gets that connection next. On a
+tenant-scoping GUC that is exactly the leak this ticket exists to prevent.
+
+Both pollutions were swept afterwards (`RESET app.current_team_id` across 40
+connections; verified 14/15 and 10/10 subsequently NULL).
+
+By contrast `set_config('app.current_team_id', $1, true)` — the function form of
+`SET LOCAL` — inside an explicit transaction returned the value correctly inside
+the transaction and NULL immediately after COMMIT, **in both pooling modes**. So
+the answer to "does it work on transaction pooling" is **yes, for `SET LOCAL`
+inside a transaction, and emphatically no for a bare `SET`.**
+
+## The shape chosen, and the one that was rejected
+
+Every query on the six protected models runs as a Prisma **batch** transaction:
+
+```ts
+const [, result] = await client.$transaction([
+  client.$executeRaw(Prisma.sql`SELECT set_config('app.current_team_id', ${teamId}, true)`),
+  query(args),
+]);
+```
+
+An **interactive** transaction (`$transaction(async tx => …)`) was rejected: it
+holds a pooled server connection open across application-level awaits, which in
+transaction mode is precisely the shape that serialises requests under load. The
+batch form sends the unit and releases at COMMIT. Measured — it does not
+serialise:
+
+| environment | unscoped | scoped | overhead | 30 in parallel |
+|---|---|---|---|---|
+| local (`127.0.0.1:54322`) | 3.09 ms | 9.09 ms | **+6.00 ms (194%)** | 35 ms wall vs ~273 ms if serialised |
+| production `:6543` (London, from UK dev box) | 833.89 ms | 1131.69 ms | **+297.79 ms (36%)** | 2179 ms wall vs ~33951 ms if serialised |
+| staging `:5432` (Singapore, `connection_limit=5`) | 393.39 ms | 1601.03 ms | **+1207.64 ms (307%)** | 9746 ms wall vs ~48031 ms if serialised |
+
+**Read those absolute numbers with care.** They are dominated by the link from
+this development machine, not by the wrapper. Decomposed on production:
+
+```
+bare SELECT 1 (one round trip)          779.2 ms   <- the link, not us
+SELECT 1 inside a batch transaction     796.5 ms   <- BEGIN/COMMIT costs ~17 ms
+set_config + SELECT 1 in a transaction 1125.0 ms
+```
+
+So the cost is **one extra statement round trip per query**; BEGIN/COMMIT itself
+is ~17 ms and effectively pipelined. The honest production estimate is therefore
+"one additional round trip", which on the local stack is +6 ms and from an
+in-region deployment (Vercel London → pooler London) should be closer to the
+local figure than to the 298 ms measured over this WAN link. **That last clause
+is reasoning, not measurement** — nothing has been deployed in-region yet.
+
+## Session mode exhausts where transaction mode does not
+
+Running the suite against staging `:5432` with Prisma's default pool produced
+3 failures, all `Can't reach database server`. That is pool exhaustion, **not**
+an isolation failure — the two are indistinguishable in a test summary and mean
+completely different things, so it was confirmed rather than assumed: with
+`?connection_limit=5&pool_timeout=60` the same suite reports
+**60 interleaved queries across 2 tenants, 0 cross-tenant violations.**
+Production `:6543` passed all 12 with default pool settings. This is a further
+argument for the app staying on transaction mode.
+
+## The bug this found in its own implementation
+
+`withTeamScope` originally read `storage.run({ teamId }, fn)`. That is subtly
+wrong. A Prisma client extension's `query` hook does not run when you *call*
+`prisma.route.findMany(...)` — it runs when the returned PrismaPromise is
+**awaited**. So `await withTeamScope(id, () => prisma.route.findMany(...))`
+created the promise inside the AsyncLocalStorage store and resolved it outside,
+`currentTeamId()` returned `undefined`, and no scope was ever set. Observed:
+`new row violates row-level security policy for table "Route"` (SQLSTATE 42501)
+on INSERT, and zero rows on SELECT. The fix is
+`storage.run({ teamId }, async () => await fn())`, and there is now a named
+regression test for it.
+
+Note which way it failed: **it denied, it did not leak.** That is the property
+the whole design rests on — the extension only *grants* scope, so every failure
+mode of the application code loses visibility rather than gaining it. Scope is
+never derived from the query's own `where` clause, because a query that forgot
+`where teamId` would then scope itself to whatever it asked for.
+
+## Environment drift found on staging
+
+Staging had **RLS enabled with ZERO policies on all 16 non-Relay tables**
+(`User`, `Session`, `Team`, `Account`, …) while production had RLS off on the
+same 16. Enabled-with-no-policy is deny-all for any non-bypass role, so
+`relay_app` could not even create a `Team` fixture — the app would be dead on
+staging the moment it stopped connecting as `postgres`. It is invisible while
+the app connects as `postgres` (`rolbypassrls=t`), which is exactly how it
+survived unnoticed.
+
+Staging was aligned to production (RLS disabled on those 16; now 6 of 22, the
+same as production) so the rehearsal is faithful. **This is flagged rather than
+settled:** "RLS on `User`/`Team`/`Session` with real policies" is a defensible
+end state, but it needs policies designed for it, and that is not RELAY-39.
+
+## Supabase Realtime cannot read these tables — and this design does not change that
+
+Stated explicitly because RELAY-7, RELAY-28 and RELAY-35 all depend on the
+answer, and one has already been forced into polling by it.
+
+The policies key on `current_setting('app.current_team_id')`, a **connection-local
+GUC**. Supabase Realtime evaluates RLS per subscriber as the `authenticated`
+role on its own connections, and a Realtime subscriber has no way to execute
+`set_config` in that context — there is no hook for it. So the GUC is always
+NULL there, `"teamId" = NULL` is never true, and Realtime sees **0 rows**. That
+matches RELAY-7's independent probe (0 of 22).
+
+RELAY-39 does **not** fix this and does not make it worse. The two are
+structurally different mechanisms: this ticket sets the GUC on the *app's own
+Prisma connection*, which is a path Realtime never travels. Making Realtime work
+needs a **second, additive policy** for the `authenticated` role keyed on
+something a JWT carries, which in turn requires bridging NextAuth identities to
+Supabase Auth — the same `auth.uid()` gap RELAY-11 documented and declined to
+paper over. Until someone takes that on, **treat these six tables as
+Realtime-unreadable and poll.** That is a deliberate, recorded consequence of a
+GUC-based policy design, not an oversight.
+
+## What is NOT done, and exactly what is left
+
+`DATABASE_URL` still points at `postgres`. **This is the one criterion not met,
+and it is not met on purpose.** The scope must be set from the session at the
+call sites, and until it is, connecting as `relay_app` makes every Relay query
+return zero rows — a total outage of the product's core feature on a project now
+taking real signups. The mechanism is proven; the wiring is a separate, small,
+mechanical change across files that belong to other agents' tickets right now:
+
+1. In each API route that already calls BoxyHQ's `throwIfNoTeamAccess`, wrap the
+   handler body in `withTeamScope(teamMember.teamId, () => …)` using the teamId
+   that check already returned. **Never a value from `req.query` or `req.body`.**
+2. `models/route.ts::fetchRouteBySlugs` is the one path with no session and no
+   teamId — the proxy's internal route lookup. It must become: resolve `Team` by
+   slug first (`Team` has no RLS), then `withTeamScope(team.id, …)` and look the
+   route up inside it. Without this, ingestion breaks.
+3. The QStash consumer path takes its teamId from the signed envelope, which
+   `assertRouteBelongsToTeam` already re-verifies against the database. Wrap
+   after that check, not before.
+4. Then set `DATABASE_URL=$RELAY_APP_DATABASE_URL` and run the suite against it.
+5. `lib/nextAuth.ts:38` should take `unscopedPrisma` rather than `prisma`. The
+   extended client is missing `$on`/`$use`, which `PrismaAdapter`'s nominal type
+   demands; `lib/prisma.ts` currently casts to keep that file compiling and
+   untouched. Nothing in the repo calls `$on`/`$use` (grepped), and the adapter
+   only touches non-RLS tables, so the cast is safe — but the import is the
+   right fix.
+
+Until step 4, the six tables remain exactly what RELAY-11 left them: enforced
+against every path except the app's own.

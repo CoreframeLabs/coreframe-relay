@@ -2,7 +2,7 @@
 // A `Json?` column has two distinct nulls in Postgres — SQL NULL and the JSON value
 // `null` — and `DbNull` is the one that means "no payload stored".
 import { Prisma } from '@prisma/client';
-import type { DlqItem } from '@prisma/client';
+import type { DlqItem, RouteStatus } from '@prisma/client';
 import { MAX_INLINE_PAYLOAD_BYTES } from '@coreframe-relay/types';
 
 import { prisma } from '@/lib/prisma';
@@ -140,5 +140,221 @@ export async function fetchDlqItems(
     where: { routeId, route: { teamId } },
     orderBy: { createdAt: 'desc' },
     take,
+  });
+}
+
+/* ────────────────────────────────────────────────────────────────────────────────────
+ * [RELAY-8] — the DLQ page and its Retry action.
+ *
+ * Everything below is additive. Nothing above was restructured.
+ * ──────────────────────────────────────────────────────────────────────────────────── */
+
+/**
+ * How much of a stored payload the list endpoint will return per row.
+ *
+ * The cap is on the RESPONSE, not just the rendering. A page showing 200 rows of up-to-64KB
+ * payloads would ship ~12MB of JSON to the browser to render maybe forty visible
+ * characters of each — and truncating only in React would mean the whole blob still
+ * crossed the wire. `payloadBytes` is returned alongside so the UI can state the real size
+ * rather than implying the preview is the whole thing.
+ */
+export const DLQ_PREVIEW_MAX_CHARS = 2_000;
+
+/** The route fields the DLQ page needs. Deliberately not `select: *` — see below. */
+export type DlqRouteRef = {
+  id: string;
+  name: string;
+  slug: string;
+  destination: string;
+  maxRetries: number;
+  /**
+   * Carried so the retry endpoint can refuse a PAUSED route. Pausing means "stop sending
+   * to this destination"; replaying dead webhooks into it would contradict the one
+   * instruction the operator gave.
+   */
+  status: RouteStatus;
+};
+
+/** One row as the DLQ page consumes it. This shape IS the API contract. */
+export type DlqListRow = {
+  id: string;
+  requestId: string;
+  failReason: string;
+  attemptCount: number;
+  createdAt: string;
+  expiresAt: string;
+  retriedAt: string | null;
+  /**
+   * False when the body was never retained — the over-`MAX_INLINE_PAYLOAD_BYTES` case
+   * `retainBody()` above records. Such an item can NEVER be retried, and the UI must say
+   * so instead of offering a Retry button that fails.
+   */
+  payloadRetained: boolean;
+  /** Byte length of the retained body, or null when nothing was retained. */
+  payloadBytes: number | null;
+  /** At most `DLQ_PREVIEW_MAX_CHARS` characters of the body. Never the whole thing. */
+  payloadPreview: string | null;
+  /** True when `payloadPreview` is shorter than the stored body. */
+  payloadTruncated: boolean;
+  route: DlqRouteRef;
+};
+
+/**
+ * Recover the raw request body from a `DlqItem.payload` column.
+ *
+ * `retainBody()` stores the body as a JSON *string*, not a parsed object, so the exact
+ * bytes received are the exact bytes replayed — re-encoding a payload is how a signature
+ * the destination would have verified stops verifying. The `typeof` branch is therefore
+ * the normal path; the `JSON.stringify` fallback exists only so a row written by some
+ * future writer that stored an object does not read back as `[object Object]`.
+ *
+ * Note both of a `Json?` column's nulls — SQL NULL and JSON `null` — arrive here as JS
+ * `null`, and both mean the same thing for our purposes: there is no body.
+ */
+export function readStoredBody(
+  payload: Prisma.JsonValue | null
+): string | null {
+  if (payload === null || payload === undefined) return null;
+  return typeof payload === 'string' ? payload : JSON.stringify(payload);
+}
+
+function toListRow(item: DlqItem & { route: DlqRouteRef }): DlqListRow {
+  const body = readStoredBody(item.payload);
+  const preview = body === null ? null : body.slice(0, DLQ_PREVIEW_MAX_CHARS);
+
+  return {
+    id: item.id,
+    requestId: item.requestId,
+    failReason: item.failReason,
+    attemptCount: item.attemptCount,
+    createdAt: item.createdAt.toISOString(),
+    expiresAt: item.expiresAt.toISOString(),
+    retriedAt: item.retriedAt ? item.retriedAt.toISOString() : null,
+    payloadRetained: body !== null,
+    payloadBytes: body === null ? null : Buffer.byteLength(body, 'utf8'),
+    payloadPreview: preview,
+    payloadTruncated: body !== null && body.length > DLQ_PREVIEW_MAX_CHARS,
+    route: item.route,
+  };
+}
+
+/**
+ * Every DLQ item for a team, newest first, across all of its routes.
+ *
+ * `fetchDlqItems` above is per-route; the page's acceptance criterion is "displays all
+ * `DlqItem` rows", which is team-wide. Same `route: { teamId }` scope, same reasoning.
+ *
+ * The `select` on `route` is the response contract, not an optimisation: a DLQ row is
+ * rendered in a browser, and `include: { route: true }` would ship the route's whole
+ * record — currently including nothing secret, but that is a property of today's schema
+ * rather than a decision anyone made.
+ */
+export async function fetchDlqItemsForTeam(
+  teamId: string,
+  take = 200
+): Promise<DlqListRow[]> {
+  const items = await prisma.dlqItem.findMany({
+    where: { route: { teamId } },
+    orderBy: { createdAt: 'desc' },
+    take,
+    include: {
+      route: {
+        select: {
+          id: true,
+          name: true,
+          slug: true,
+          destination: true,
+          maxRetries: true,
+          status: true,
+        },
+      },
+    },
+  });
+
+  return items.map(toListRow);
+}
+
+/**
+ * One DLQ item by id, scoped to a team.
+ *
+ * Takes `teamId` for the reason stated at the top of this file: a `DlqItem` id is a UUID a
+ * user can hold from another team, so `findUnique({ where: { id } })` is an IDOR. This is
+ * the first thing the retry endpoint calls, before it looks at a destination and long
+ * before it publishes anything.
+ */
+export async function fetchDlqItemForTeam(
+  teamId: string,
+  id: string
+): Promise<(DlqItem & { route: DlqRouteRef }) | null> {
+  return prisma.dlqItem.findFirst({
+    where: { id, route: { teamId } },
+    include: {
+      route: {
+        select: {
+          id: true,
+          name: true,
+          slug: true,
+          destination: true,
+          maxRetries: true,
+          status: true,
+        },
+      },
+    },
+  });
+}
+
+/**
+ * Claim an item for retry, atomically. Returns the claim timestamp, or null if it was
+ * already claimed.
+ *
+ * **This is the idempotency guard, and its shape matters more than its existence.** The
+ * obvious implementation — read `retriedAt`, see null, then write — has a window between
+ * the read and the write in which a second request reads the same null. Two operators
+ * clicking Retry at the same moment, or one operator double-clicking, then both publish,
+ * and the customer's endpoint receives the payload twice. Re-delivering a webhook that a
+ * customer has already processed is exactly the failure this product exists to prevent.
+ *
+ * `updateMany` with `retriedAt: null` in the WHERE compiles to a single
+ * `UPDATE … WHERE "retriedAt" IS NULL`, so the database — not this process — decides who
+ * wins. The loser gets `count: 0` and publishes nothing.
+ *
+ * `route: { teamId }` stays in the WHERE even though the caller has already verified
+ * ownership: `updateMany` matching on the primary key alone would write across tenants,
+ * which is the same reasoning `models/route.ts` records for `updateRoute`/`deleteRoute`.
+ */
+export async function claimDlqRetry(
+  teamId: string,
+  id: string
+): Promise<Date | null> {
+  const claimedAt = new Date();
+
+  const { count } = await prisma.dlqItem.updateMany({
+    where: { id, retriedAt: null, route: { teamId } },
+    data: { retriedAt: claimedAt },
+  });
+
+  return count === 1 ? claimedAt : null;
+}
+
+/**
+ * Give a claim back, but only when the publish was DEFINITIVELY rejected.
+ *
+ * The `retriedAt: claimedAt` term is load-bearing: it releases only the exact claim this
+ * request made. Without it a release could clear a claim some other request had since
+ * taken, and the item would be retryable twice.
+ *
+ * The caller must not use this for an ambiguous failure — a timeout or a socket error
+ * against QStash may mean the publish landed and the response was lost. Releasing there
+ * would risk a double delivery, which is the one outcome worse than an item stuck in a
+ * retried state that an operator can see and reason about.
+ */
+export async function releaseDlqRetryClaim(
+  teamId: string,
+  id: string,
+  claimedAt: Date
+): Promise<void> {
+  await prisma.dlqItem.updateMany({
+    where: { id, retriedAt: claimedAt, route: { teamId } },
+    data: { retriedAt: null },
   });
 }
