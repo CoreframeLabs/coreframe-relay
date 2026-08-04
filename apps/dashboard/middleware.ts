@@ -65,6 +65,21 @@ const unAuthenticatedRoutes = [
   '/api/invitations/*',
   '/api/webhooks/stripe',
   '/api/webhooks/dsync',
+  // ── Relay machine-to-machine endpoints [RELAY-5] ──
+  // Both callers are programs, not browsers: the Cloudflare Worker proxy and QStash.
+  // Left out of this list they would be redirected to `/auth/login`, so a Worker asking
+  // for a route would receive a 307 and an HTML page instead of JSON — and QStash would
+  // read that redirect as a delivery failure and retry a webhook that never arrived.
+  //
+  // Each is named EXACTLY, not by wildcard. `/api/relay/internal/*` would silently
+  // un-authenticate any future file dropped into that directory; this way a new internal
+  // endpoint has to make that choice explicitly.
+  //
+  // Neither is unauthenticated in the real sense — they authenticate themselves:
+  // route-lookup by constant-time bearer comparison against RELAY_API_SECRET, qstash by
+  // QStash's request signature, both before touching any data.
+  '/api/relay/internal/route-lookup',
+  '/api/relay/qstash',
   '/auth/**',
   '/invitations/*',
   '/terms-condition',

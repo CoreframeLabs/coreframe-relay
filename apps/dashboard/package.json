@@ -48,6 +48,7 @@
     "@sentry/nextjs": "10.52.0",
     "@tailwindcss/typography": "0.5.19",
     "@tanstack/react-table": "^8.21.3",
+    "@upstash/qstash": "^2.11.3",
     "bcryptjs": "3.0.3",
     "class-variance-authority": "^0.7.1",
     "classnames": "2.5.1",

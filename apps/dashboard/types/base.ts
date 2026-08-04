@@ -65,7 +65,11 @@ export type AppEvent =
   | 'route.updated'
   | 'route.removed'
   | 'route.paused'
-  | 'route.resumed';
+  | 'route.resumed'
+  // ── Relay [RELAY-5] — one per terminal state of a delivery attempt ──
+  | 'delivery.delivered'
+  | 'delivery.retrying'
+  | 'delivery.dlq';
 
 export type AUTH_PROVIDER =
   | 'github'

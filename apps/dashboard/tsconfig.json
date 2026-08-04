@@ -21,6 +21,21 @@
       "@/lib/*": ["lib/*"],
       "@/components/*": ["components/*"],
       "@/hooks/*": ["hooks/*"],
+      // [RELAY-5] `packages/types` declares `"exports": { ".": … }` only, so the
+      // proxy↔dashboard contract in `src/internal.ts` is not reachable as a subpath:
+      // webpack honours the exports map and fails with "Package path ./src/internal is
+      // not exported" — measured, not assumed. Re-declaring the schema on this side was
+      // the alternative and is worse: two copies of a contract that exists precisely so
+      // the two apps cannot drift.
+      //
+      // This alias is a SHIM. The real fix is one line in `packages/types/package.json`
+      // adding `"./internal": "./src/internal.ts"` to the exports map, which is outside
+      // this ticket's file boundary. The specifier below is deliberately the same one
+      // that subpath export would create, so when it lands this entry can simply be
+      // deleted and no import site changes.
+      "@coreframe-relay/types/internal": [
+        "../../packages/types/src/internal.ts",
+      ],
     },
   },
   "include": ["next-env.d.ts", "**/*.ts", "**/*.tsx", "next-auth.d.ts"],
