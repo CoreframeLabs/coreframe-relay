@@ -30,3 +30,10 @@ test-results/
 # Editor / OS
 .DS_Store
 *.log
+
+# graphify knowledge graph: local-only token/cost ledger.
+# graphify-out/ itself is intentionally NOT ignored - it is meant to be committed.
+graphify-out/cost.json
+
+# graphify generated index — rebuilt by `graphify update .`, never hand-edited.
+graphify-out/

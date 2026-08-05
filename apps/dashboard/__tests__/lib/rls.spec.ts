@@ -326,21 +326,75 @@ describeIfConfigured('[RELAY-39] RLS is enforced by Postgres, not by Prisma', ()
 
       const results = await Promise.all(work);
 
-      const violations = results.filter(
-        (r) =>
-          r.rows.length !== 1 ||
-          r.rows[0].id !== r.myRoute ||
-          r.rows[0].teamId !== r.mine
+      // Classify the two failure modes SEPARATELY, because they mean opposite
+      // things and a single "violations" count hides that:
+      //
+      //   LEAKED  -- a row belonging to the other team came back. The scope was
+      //              wrong, not absent. This is the cross-tenant data exposure
+      //              the whole ticket exists to prevent. Non-zero here is a
+      //              security failure.
+      //   EMPTY   -- nothing came back. The scope was lost, not crossed
+      //              (`current_setting(..., true)` returns NULL rather than
+      //              raising, so an unscoped query denies silently). Non-zero
+      //              here is a correctness/availability bug in the plumbing --
+      //              bad, but it fails closed.
+      //
+      // Asserting only "non-empty" would pass a leak; asserting only "no leak"
+      // would pass a mechanism that silently stopped working. Both are checked.
+      const leaked = results.filter((r) =>
+        r.rows.some((row) => row.id === r.theirRoute || row.teamId !== r.mine)
+      );
+      const empty = results.filter((r) => r.rows.length === 0);
+      const wrongShape = results.filter(
+        (r) => r.rows.length > 1 || (r.rows.length === 1 && r.rows[0].id !== r.myRoute)
       );
 
       // eslint-disable-next-line no-console
       console.log(
-        `[RELAY-39] concurrency: ${ITERATIONS} interleaved queries across 2 tenants, ` +
-          `${violations.length} cross-tenant violations`
+        `[RELAY-39] concurrency: ${ITERATIONS} interleaved queries across 2 tenants -> ` +
+          `${leaked.length} LEAKED (other team's rows), ${empty.length} EMPTY (scope lost), ` +
+          `${wrongShape.length} wrong-shape`
       );
 
-      expect(violations).toEqual([]);
+      expect(leaked).toEqual([]);
+      expect(empty).toEqual([]);
+      expect(wrongShape).toEqual([]);
       expect(results).toHaveLength(ITERATIONS);
+    });
+
+    it('keeps the scope inside chained timer callbacks (the SSE poll shape)', async () => {
+      // RELAY-7's `pages/api/teams/[slug]/relay/log-stream.ts` holds ONE HTTP
+      // response open for minutes and re-queries on a chained setTimeout. That
+      // is a genuinely different shape from a request/response handler, and it
+      // is worth proving rather than assuming, because if AsyncLocalStorage did
+      // NOT propagate into timer callbacks the stream would authenticate
+      // correctly and then silently emit an empty feed forever.
+      //
+      // Note what this does NOT need: the long-lived thing is the HTTP
+      // response, not a database transaction. Each poll is its own short query,
+      // so each gets its own `SET LOCAL` inside its own transaction. A
+      // connection is never held across the idle gap.
+      const seen: { tick: number; ids: string[] }[] = [];
+
+      await withTeamScope(TEAM_A, async () => {
+        for (let tick = 0; tick < 3; tick++) {
+          // Chained timeout, exactly as the SSE endpoint schedules its polls.
+          await new Promise((resolve) => setTimeout(resolve, 30));
+          const rows = await db.route.findMany({
+            where: { id: { in: [ROUTE_A, ROUTE_B] } },
+            select: { id: true },
+          });
+          seen.push({ tick, ids: rows.map((r) => r.id) });
+        }
+      });
+
+      // eslint-disable-next-line no-console
+      console.log('[RELAY-39] SSE-shaped polls:', JSON.stringify(seen));
+
+      expect(seen).toHaveLength(3);
+      for (const s of seen) {
+        expect(s.ids).toEqual([ROUTE_A]);
+      }
     });
 
     it('does not leave the setting behind on a pooled connection', async () => {
