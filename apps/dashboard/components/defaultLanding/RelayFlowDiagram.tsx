@@ -5,7 +5,9 @@
  * literal strings on it are the request line and the response body, and both are copied
  * from `apps/proxy/src/routes/ingest.ts` (`c.json({ status: 'queued', requestId }, 200)`,
  * with the comment there explaining why it is 200 and not 202) and from
- * `models/route.ts#relayUrlFor` (`{base}/in/{teamSlug}/{routeSlug}`).
+ * `models/route.ts#relayUrlFor` (`{base}/in/{teamSlug}/{routeSlug}/{ingestToken}` —
+ * [RELAY-57]; the token segment is elided here because a landing-page mock must never
+ * train a reader to copy a real credential shape).
  *
  * Motion is CSS only (no dependency could be installed — see RELAY-62) and is switched
  * off wholesale by `prefers-reduced-motion: reduce` in `styles/globals.css`.
@@ -69,7 +71,8 @@ const RelayFlowDiagram = () => (
         <code>
           <span className="text-zinc-500">$</span> curl -X POST
           https://…/in/<span className="text-violet-300">acme</span>/
-          <span className="text-violet-300">orders</span> -d @event.json{'\n'}
+          <span className="text-violet-300">orders</span>/
+          <span className="text-violet-300">&#123;ingest-token&#125;</span> -d @event.json{'\n'}
           <span className="text-emerald-400">200</span>{' '}
           {'{"status":"queued","requestId":"…"}'}
         </code>
