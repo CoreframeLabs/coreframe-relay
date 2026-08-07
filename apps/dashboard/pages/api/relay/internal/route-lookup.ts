@@ -85,6 +85,11 @@ export default async function handler(
       destination: route.destination,
       maxRetries: route.maxRetries,
       status: route.status,
+      // [RELAY-57] sent so the proxy can constant-time compare the caller's path
+      // credential. This is the ONE place the token crosses a process boundary:
+      // secret-to-secret, TLS-only, Bearer-authenticated, and never logged. Zod keeps
+      // the shape honest, so a future column still cannot leak here.
+      ingestToken: route.ingestToken,
     });
 
     // Caching is the proxy's business (ROUTE_LOOKUP_CACHE_TTL_SECONDS), but this response

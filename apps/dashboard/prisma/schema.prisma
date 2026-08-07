@@ -258,7 +258,7 @@ enum DeliveryStatus {
 }
 
 /// An inbound webhook endpoint. `slug` is the public URL segment:
-/// POST /in/:teamSlug/:routeSlug
+/// POST /in/:teamSlug/:routeSlug/:ingestToken   ([RELAY-57] — the URL is the credential)
 model Route {
   id          String      @id @default(uuid())
   teamId      String
@@ -267,6 +267,17 @@ model Route {
   destination String
   maxRetries  Int         @default(7)
   status      RouteStatus @default(ACTIVE)
+  /// Per-route ingest credential ([RELAY-57]). Stripe/Shopify/GitHub/Meta cannot set a
+  /// custom header, so the token IS the endpoint: `…/in/:teamSlug/:routeSlug/:ingestToken`.
+  /// 24 random bytes, base64url (192-bit entropy, URL-safe) — Stripe-style bearer-in-URL.
+  /// Written by the app at create/rotate time; backfilled by `ingestToken_backfill()`,
+  /// a migration-installed plpgsql function (crypto is not expressible as a Prisma
+  /// `@default`). `digest()` @-mentions a reserved builtin, hence a named function.
+  /// Never a Prisma default: `default(uuid())` would create the SHARED-secret failure
+  /// mode — every route accepting the same token.
+  /// The unique constraint doubles as the rotation index — proxies accept by path
+  /// token, never by scanning.
+  ingestToken String       @unique
   createdAt   DateTime    @default(now()) @db.Timestamptz(6)
   updatedAt   DateTime    @updatedAt @db.Timestamptz(6)
 

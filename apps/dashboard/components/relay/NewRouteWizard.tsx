@@ -214,6 +214,12 @@ export function NewRouteWizard({
               Nothing is delivered until your provider posts to it. The delivery log will
               show attempts as they arrive.
             </p>
+            <p className="text-xs text-muted-foreground">
+              The URL is the credential — the last path segment is the route&apos;s ingest
+              token ([RELAY-57]), accepted by Stripe, Shopify, GitHub and Meta because
+              none of them need to set a custom header. If it leaks, rotate it from the
+              Routes table; the old URL stops working immediately.
+            </p>
           </div>
         )}
 

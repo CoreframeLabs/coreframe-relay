@@ -10,6 +10,7 @@ import {
   type SortingState,
 } from '@tanstack/react-table';
 import type { Route, RouteStatus } from '@prisma/client';
+import { Check, Copy, Eye, EyeOff, Loader2, RotateCw } from 'lucide-react';
 import {
   Table,
   TableBody,
@@ -18,6 +19,7 @@ import {
   TableHeader,
   TableRow,
 } from '@/components/ui/table';
+import { Button } from '@/components/ui/button';
 import { StatusBadge } from './StatusBadge';
 import { CopyableUrl } from './CopyableUrl';
 import { cn } from '@/lib/utils';
@@ -60,13 +62,77 @@ const hostOf = (url: string) => {
 export function RoutesTable({
   routes,
   filter,
+  teamSlug,
+  onRotated,
 }: {
   routes: RouteRow[];
   filter: RouteStatus | 'ALL';
+  /** Tenant scope for the rotate call — from the page's own router, never a row. */
+  teamSlug: string;
+  /** [RELAY-57] invoked after a rotation so the SWR cache refetches with the new URL. */
+  onRotated: () => void;
 }) {
   const [sorting, setSorting] = useState<SortingState>([{ id: 'createdAt', desc: true }]);
   const { t } = useTranslation('common');
   const [search, setSearch] = useState('');
+
+  // ── [RELAY-57] reveal / copy / rotate, per row. ────────────────────────────────────
+  // The token lives in every string here and nowhere else: `relayUrl` is the only place
+  // it appears in the payload, so mask/reveal operate on that one string and a rotated
+  // row is a fresh row. `revealedIds` and `copiedId` reset by keyed state, not by
+  // effect — a user who reveals a row and then rotates it must not see the OLD token
+  // flash back while the new one loads.
+  const [revealedIds, setRevealedIds] = useState<ReadonlySet<string>>(new Set());
+  const [copiedId, setCopiedId] = useState<string | null>(null);
+  const [rotatingId, setRotatingId] = useState<string | null>(null);
+  const [rotateError, setRotateError] = useState<string | null>(null);
+
+  const toggleReveal = (id: string) =>
+    setRevealedIds((current) => {
+      const next = new Set(current);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+
+  /** Redact exactly the last path segment — the token — leaving the slugs legible. */
+  const maskUrl = (url: string) => url.replace(/\/[^/]+$/, '/••••••••');
+
+  const copyUrl = async (route: RouteRow) => {
+    try {
+      await navigator.clipboard.writeText(route.relayUrl);
+      setCopiedId(route.id);
+      setTimeout(() => setCopiedId((c) => (c === route.id ? null : c)), 1600);
+    } catch {
+      // The instruction is in the row itself once revealed; a toast here would be a
+      // second place to say the same thing and a first place to look when copy fails.
+    }
+  };
+
+  const rotate = async (route: RouteRow) => {
+    setRotatingId(route.id);
+    setRotateError(null);
+    try {
+      // Revocation is server-side and immediate; the payload shape is relayUrl-bearing.
+      const res = await fetch(
+        `/api/teams/${encodeURIComponent(teamSlug)}/relay/routes/${route.id}/rotate-token`,
+        { method: 'POST' }
+      );
+      const json = await res.json();
+      if (!res.ok) throw new Error(json?.error?.message || 'Rotate failed.');
+      // Clear this row's reveal so a stale token never stays visible after rotation.
+      setRevealedIds((current) => {
+        const next = new Set(current);
+        next.delete(route.id);
+        return next;
+      });
+      onRotated();
+    } catch (err) {
+      setRotateError(err instanceof Error ? err.message : 'Rotate failed.');
+    } finally {
+      setRotatingId(null);
+    }
+  };
 
   const columns = useMemo(
     () => [
@@ -84,7 +150,80 @@ export function RoutesTable({
       columnHelper.accessor('relayUrl', {
         header: 'Relay URL',
         enableSorting: false,
-        cell: (info) => <CopyableUrl url={info.getValue()} className="max-w-[18rem]" />,
+        cell: (info) => {
+          const route = info.row.original;
+          const url = info.getValue();
+          const revealed = revealedIds.has(route.id);
+          const rotating = rotatingId === route.id;
+          const copied = copiedId === route.id;
+
+          return (
+            <div className="flex min-w-0 max-w-[22rem] items-center gap-1.5">
+              {/* Revealed: full URL, copyable. Masked: token redacted, not copyable. */}
+              {revealed ? (
+                <CopyableUrl url={url} className="min-w-0 flex-1" />
+              ) : (
+                <span
+                  className="min-w-0 flex-1 truncate font-mono text-xs text-muted-foreground"
+                  title="Reveal the ingest URL to copy it"
+                >
+                  {maskUrl(url)}
+                </span>
+              )}
+
+              <Button
+                type="button"
+                variant="ghost"
+                size="icon"
+                className="h-7 w-7 shrink-0"
+                onClick={() => toggleReveal(route.id)}
+                aria-pressed={revealed}
+                aria-label={revealed ? 'Hide ingest URL' : 'Reveal ingest URL'}
+                disabled={rotating}
+              >
+                {revealed ? (
+                  <EyeOff className="h-3.5 w-3.5" aria-hidden="true" />
+                ) : (
+                  <Eye className="h-3.5 w-3.5" aria-hidden="true" />
+                )}
+              </Button>
+
+              <Button
+                type="button"
+                variant="ghost"
+                size="icon"
+                className="h-7 w-7 shrink-0"
+                onClick={() => copyUrl(route)}
+                aria-label={copied ? 'Copied' : 'Copy ingest URL'}
+                disabled={rotating}
+              >
+                {copied ? (
+                  <Check className="h-3.5 w-3.5 text-green-500" aria-hidden="true" />
+                ) : (
+                  <Copy className="h-3.5 w-3.5" aria-hidden="true" />
+                )}
+              </Button>
+
+              {/* Rotate: new token now, old one dead now, confirmed by refetch. */}
+              <Button
+                type="button"
+                variant="ghost"
+                size="icon"
+                className="h-7 w-7 shrink-0"
+                onClick={() => rotate(route)}
+                aria-label="Rotate ingest token"
+                disabled={rotating}
+                title="Rotate token — the old URL stops working immediately"
+              >
+                {rotating ? (
+                  <Loader2 className="h-3.5 w-3.5 animate-spin" aria-hidden="true" />
+                ) : (
+                  <RotateCw className="h-3.5 w-3.5" aria-hidden="true" />
+                )}
+              </Button>
+            </div>
+          );
+        },
       }),
       columnHelper.accessor('destination', {
         header: 'Destination',
@@ -116,7 +255,11 @@ export function RoutesTable({
         ),
       }),
     ],
-    []
+    // Rebuilt whenever per-row interaction state changes: cell renderers read
+    // `revealedIds`/`rotatingId`/`copiedId` from closure, and a memo that ignored them
+    // would leave a revealed token visible — or a spinner frozen — after the state moved.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [revealedIds, rotatingId, copiedId, teamSlug, onRotated]
   );
 
   const data = useMemo(
@@ -146,6 +289,11 @@ export function RoutesTable({
 
   return (
     <div className="rounded-lg border">
+      {rotateError && (
+        <p className="mb-3 rounded-md border border-red-500/30 bg-red-500/5 px-3 py-2 text-sm text-red-400">
+          {rotateError}
+        </p>
+      )}
       <Table>
         <TableHeader>
           {table.getHeaderGroups().map((group) => (

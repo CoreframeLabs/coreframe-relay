@@ -77,7 +77,12 @@ export function BufferRoutes() {
           Loading…
         </div>
       ) : (
-        <RoutesTable routes={routes} filter={filter} />
+        <RoutesTable
+          routes={routes}
+          filter={filter}
+          teamSlug={slug ?? ''}
+          onRotated={() => mutate()}
+        />
       )}
 
       {slug && (

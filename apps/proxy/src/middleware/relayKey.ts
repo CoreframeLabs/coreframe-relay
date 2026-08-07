@@ -39,41 +39,58 @@ export async function timingSafeEqualStrings(a: string, b: string): Promise<bool
 }
 
 /**
+ * The pure check, extracted for [RELAY-57] so the ingestion route can run it inline
+ * only on the header-credentialed path. A path-token request never reaches this.
+ *
+ * Returned as a discriminated result rather than thrown: the caller chooses its own
+ * status code, and a 401 here must stay shaped exactly like RELAY-4's 401 so a sender
+ * mid-migration cannot tell which arm answered it.
+ */
+export async function verifyRelayKey(
+  env: { RELAY_API_SECRET?: string },
+  req: Request
+): Promise<{ ok: true } | { ok: false; code: 'misconfigured' | 'unauthorized' }> {
+  const expected = env.RELAY_API_SECRET;
+
+  if (!expected) {
+    // A proxy with no secret configured must refuse everything rather than fail open.
+    return { ok: false, code: 'misconfigured' };
+  }
+
+  const presented = req.headers.get(RELAY_KEY_HEADER);
+
+  // Compared even when absent, against a value of the same shape, so that a missing
+  // header and a wrong header take the same path and the same time.
+  const ok = await timingSafeEqualStrings(presented ?? '', expected);
+  return ok ? { ok: true } : { ok: false, code: 'unauthorized' };
+}
+
+/**
  * Authenticate an inbound webhook against the shared `RELAY_API_SECRET`.
  *
- * ⚠ KNOWN PRODUCT DEFECT — [RELAY-57]. This is the acceptance criterion as written, and
- * it is implemented as written, but a required custom header makes this endpoint unusable
- * for Stripe, Shopify, GitHub and Meta: none of them let you set an arbitrary header on
- * an outbound webhook. Those are precisely the senders the product exists to receive.
- * The likely fix is a per-route unguessable ingest token in the URL path, which needs a
- * schema migration — raised as a ticket rather than decided here.
+ * [RELAY-57]: this middleware is STILL the auth on every OTHER proxy route. Only the
+ * ingest route moved off it, because a required custom header is unusable for
+ * Stripe/Shopify/GitHub/Meta — none of them let you set one on an outbound webhook.
+ * The migration keeps both accepted; this export remains so health and any future
+ * non-ingest routes keep a single auth path.
  *
  * Failure responses carry no detail beyond "unauthorized": telling a caller whether the
  * header was absent or merely wrong is a free bit of information for a brute-forcer.
  */
 export const relayKey = createMiddleware<AppEnv>(async (c, next) => {
-  const expected = c.env.RELAY_API_SECRET;
-
-  if (!expected) {
-    // A proxy with no secret configured must refuse everything rather than fail open.
-    // 503, not 401: the fault is ours, and the distinction matters when reading logs.
-    console.error(
-      JSON.stringify({
-        level: 'error',
-        event: 'proxy.misconfigured',
-        requestId: c.get('requestId'),
-        reason: 'RELAY_API_SECRET is not set',
-      })
-    );
-    throw new HTTPException(503, { message: 'proxy not configured' });
-  }
-
-  const presented = c.req.header(RELAY_KEY_HEADER);
-
-  // Compared even when absent, against a value of the same shape, so that a missing
-  // header and a wrong header take the same path and the same time.
-  const ok = await timingSafeEqualStrings(presented ?? '', expected);
-  if (!ok) {
+  const result = await verifyRelayKey(c.env, c.req.raw);
+  if (!result.ok) {
+    if (result.code === 'misconfigured') {
+      console.error(
+        JSON.stringify({
+          level: 'error',
+          event: 'proxy.misconfigured',
+          requestId: c.get('requestId'),
+          reason: 'RELAY_API_SECRET is not set',
+        })
+      );
+      throw new HTTPException(503, { message: 'proxy not configured' });
+    }
     throw new HTTPException(401, { message: 'unauthorized' });
   }
 

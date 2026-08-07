@@ -44,12 +44,29 @@ export const DestinationUrlSchema = z
     }
   }, 'destination must be an http(s) URL');
 
+/**
+ * Per-route ingest credential in the URL path — [RELAY-57].
+ *
+ * Shape: 24 random bytes, base64url-unpadded (`A–Z a–z 0–9 - _`), 32 chars, 192-bit
+ * entropy, distinct from the shared `X-Relay-Key` secret. The regex is the ACCEPT
+ * criterion on the proxy; a token that matches the field but is wrong answers 404, the
+ * same body as "no such route", so a guessing caller learns nothing.
+ */
+export const IngestTokenSchema = z
+  .string()
+  .regex(/^[A-Za-z0-9_-]{32}$/, '32 URL-safe base64url characters');
+
 export const RouteSchema = z.object({
   id: z.string().uuid(),
   teamId: z.string().uuid(),
   name: z.string().min(1).max(64),
   slug: RouteSlugSchema,
   destination: DestinationUrlSchema,
+  /**
+   * [RELAY-57] URL-path credential. Rarely serialised to the client — embedded in the
+   * derived `relayUrl` instead — but kept on the schema so a `Route` can validate.
+   */
+  ingestToken: IngestTokenSchema,
   /** Bounded because it maps onto QStash's retry budget, not an arbitrary counter. */
   maxRetries: z.number().int().min(1).max(10).default(7),
   status: RouteStatusSchema,

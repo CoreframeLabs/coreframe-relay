@@ -1,6 +1,6 @@
 import { z } from 'zod';
 
-import { RouteStatusSchema } from './route';
+import { IngestTokenSchema, RouteStatusSchema } from './route';
 
 /**
  * The proxy ↔ dashboard internal contract.
@@ -24,6 +24,11 @@ import { RouteStatusSchema } from './route';
  *   404 → { error: 'not_found' }        — no such team/route, or route is ARCHIVED
  *   401 → { error: 'unauthorized' }     — bad or missing bearer secret
  *
+ * [RELAY-57] note: the 200 body now carries `ingestToken`. This endpoint answers BEFORE
+ * the proxy has validated the path credential, so the response must never write the
+ * token to a log line, and the dashboard's own logger must redact it. The failure
+ * bodies stay fixed strings for the same reason they were at RELAY-5.
+
  * The 401 and 404 bodies are fixed strings on purpose. An internal endpoint that says
  * "team exists but route does not" is a tenant-enumeration oracle for anyone who gets
  * hold of the secret, and this endpoint answers before any customer auth has happened.
@@ -43,6 +48,18 @@ export const RouteLookupResponseSchema = z.object({
   destination: z.string().url(),
   maxRetries: z.number().int().min(1).max(10),
   status: RouteStatusSchema,
+  /**
+   * [RELAY-57] The per-route ingest token. COMPARED PROXY-SIDE: this contract sends it
+   * to the proxy and `routes/ingest.ts` runs RELAY-4's digest compare against the path
+   * credential. Dashboard-side comparison was the alternative and was rejected — it
+   * would require the proxy to FORWARD the raw token to an internal endpoint, which is
+   * exactly the "credential on the wire and in a log line" failure mode this field
+   * exists to close.
+   *
+   * This is the one place the token legitimately crosses a process boundary, and it is
+   * only ever secret-to-secret, TLS-only, Bearer-authenticated, scope-of-the-route.
+   */
+  ingestToken: IngestTokenSchema,
 });
 export type RouteLookupResponse = z.infer<typeof RouteLookupResponseSchema>;
 

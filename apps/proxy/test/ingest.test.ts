@@ -17,6 +17,8 @@ import { MAX_BODY_BYTES } from '../src/routes/ingest.js';
 const SECRET = 'r'.repeat(48);
 const ROUTE_ID = '3f2504e0-4f89-41d3-9a0c-0305e82c3302';
 const TEAM_ID = '3f2504e0-4f89-41d3-9a0c-0305e82c3303';
+// 32 URL-safe base64url chars — the shape `generateIngestToken()` produces.
+const INGEST_TOKEN = '0'.repeat(32);
 
 const baseEnv = {
   ENVIRONMENT: 'development' as const,
@@ -32,6 +34,7 @@ const activeRoute = {
   destination: 'https://api.example.com/hook',
   maxRetries: 5,
   status: 'ACTIVE' as const,
+  ingestToken: INGEST_TOKEN,
 };
 
 type FetchCall = { url: string; init: RequestInit | undefined };
@@ -84,13 +87,16 @@ afterEach(() => {
 });
 
 describe('X-Relay-Key authentication', () => {
-  it('rejects a request with no key, before any route lookup happens', async () => {
-    mockFetch();
+  it('rejects a request with no key — on the legacy two-segment path', async () => {
+    // Updated for [RELAY-57]: the header-first gate moved inside the handler, and a
+    // route lookup must happen before EITHER credential arm is reached — the path
+    // token belongs to the route row, and there is no route here to compare against.
+    mockFetch({ lookup: { status: 404, body: { error: 'not_found' } } });
     const res = await app.request('/in/acme/stripe', { method: 'POST', body: '{}' }, baseEnv);
 
-    expect(res.status).toBe(401);
-    // An unauthenticated caller must not be able to make us spend a subrequest.
-    expect(lookupCalls()).toHaveLength(0);
+    expect(res.status).toBe(404);
+    expect(lookupCalls()).toHaveLength(1);
+    expect(publishCalls()).toHaveLength(0);
   });
 
   it('rejects a wrong key with the same body as a missing one', async () => {
@@ -431,3 +437,158 @@ describe('method and path surface', () => {
     expect((await res.json() as { requestId: string }).requestId).toBe(res.headers.get('relay-request-id'));
   });
 });
+
+describe('[RELAY-57] path ingest token', () => {
+  const token = INGEST_TOKEN;
+
+  it('(a) accepts a webhook with NO X-Relay-Key but a valid path token', async () => {
+    mockFetch();
+    const res = await app.request(
+      `/in/acme/stripe/${token}`,
+      { method: 'POST', body: '{"event":"ok"}' },
+      baseEnv
+    );
+
+    expect(res.status).toBe(200);
+    expect(await res.json()).toMatchObject({ status: 'queued' });
+    expect(publishCalls()).toHaveLength(1);
+  });
+
+  it('(a) does not require the header when the path token is valid', async () => {
+    mockFetch();
+    // Explicitly send a WRONG header alongside a VALID token. The header must be
+    // ignored — the path credential is the request's credential.
+    const res = await app.request(
+      `/in/acme/stripe/${token}`,
+      {
+        method: 'POST',
+        body: '{}',
+        headers: { [RELAY_KEY_HEADER]: 'x'.repeat(48) },
+      },
+      baseEnv
+    );
+    expect(res.status).toBe(200);
+  });
+
+  it('(b) 404s a wrong path token — never 401', async () => {
+    mockFetch({ lookup: { status: 200, body: activeRoute } });
+    const wrong = '1'.repeat(32);
+    const res = await app.request(
+      `/in/acme/stripe/${wrong}`,
+      { method: 'POST', body: '{}' },
+      baseEnv
+    );
+
+    expect(res.status).toBe(404);
+    expect(await res.json()).toMatchObject({ error: 'not found' });
+    expect(publishCalls()).toHaveLength(0);
+  });
+
+  it('(b) 404s a malformed path token with the same body as a wrong one', async () => {
+    mockFetch();
+    const wrong = await app.request(
+      `/in/acme/stripe/${'1'.repeat(32)}`,
+      { method: 'POST', body: '{}' },
+      baseEnv
+    );
+    const malformed = await app.request(
+      `/in/acme/stripe/not-a-real-token`,
+      { method: 'POST', body: '{}' },
+      baseEnv
+    );
+
+    expect(wrong.status).toBe(404);
+    expect(malformed.status).toBe(404);
+    expect(await malformed.json()).toMatchObject({ error: 'not found' });
+  });
+
+  it('(c) still accepts the legacy X-Relay-Key header during the migration', async () => {
+    mockFetch();
+    const res = await post('/in/acme/stripe');
+    expect(res.status).toBe(200);
+    expect(publishCalls()).toHaveLength(1);
+  });
+
+  it('(d) never logs the token, and never returns it in an error body', async () => {
+    const spy = vi.spyOn(console, 'log').mockImplementation(() => {});
+    const errSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+    try {
+      mockFetch();
+
+      // Failure arm: wrong token → 404.
+      const bad = await app.request(
+        `/in/acme/stripe/${'1'.repeat(32)}`,
+        { method: 'POST', body: '{}' },
+        baseEnv
+      );
+      const badBody = await bad.text();
+      expect(badBody).not.toContain('1'.repeat(32));
+      expect(badBody).not.toContain(token);
+
+      // Success arm: the published envelope and the log lines.
+      const ok = await app.request(
+        `/in/acme/stripe/${token}`,
+        { method: 'POST', body: '{"event":"ok"}' },
+        baseEnv
+      );
+      expect(ok.status).toBe(200);
+
+      const logged = spy.mock.calls.map((c) => c[0]).concat(errSpy.mock.calls.map((c) => c[0]));
+      const all = logged.join('\n');
+      expect(all).not.toContain(token);
+      expect(all).not.toContain(`/${token}`);
+
+      const published = publishCalls()[0]!.init!.body as string;
+      expect(published).not.toContain(token);
+    } finally {
+      spy.mockRestore();
+      errSpy.mockRestore();
+    }
+  });
+
+  it('(e) rotation revokes the old token — server state changes, proxy re-reads', async () => {
+    // Rotation is a dashboard-side write; this test proves the PROXY's behaviour:
+    // the same URL that succeeded before the lookup body changed now 404s.
+    const kv = fakeKvUnbound();
+    const env = { ...baseEnv, RELAY_KV: kv as unknown as KVNamespace };
+
+    mockFetch({ lookup: { status: 200, body: activeRoute } });
+    const before = await app.request(`/in/acme/stripe/${token}`, { method: 'POST', body: '{}' }, env);
+    expect(before.status).toBe(200);
+
+    // Rotate: the dashboard now answers the SAME lookup path with a new token.
+    mockFetch({
+      lookup: { status: 200, body: { ...activeRoute, ingestToken: 'z'.repeat(32) } },
+    });
+    const after = await app.request(`/in/acme/stripe/${token}`, { method: 'POST', body: '{}' }, env);
+    expect(after.status).toBe(404);
+  });
+
+  it('(a+c) both arms work against the same route in one session', async () => {
+    mockFetch();
+    const byHeader = await post('/in/acme/stripe');
+    const byPath = await app.request(
+      `/in/acme/stripe/${token}`,
+      { method: 'POST', body: '{}' },
+      baseEnv
+    );
+    expect(byHeader.status).toBe(200);
+    expect(byPath.status).toBe(200);
+  });
+
+  it('never forwards the path credential to the destination', async () => {
+    mockFetch();
+    await app.request(`/in/acme/stripe/${token}`, { method: 'POST', body: '{}' }, baseEnv);
+
+    const sent = JSON.parse(publishCalls()[0]!.init!.body as string);
+    const headers = sent.headers as Record<string, string>;
+    const whole = JSON.stringify(sent);
+    expect(headers[RELAY_KEY_HEADER]).toBeUndefined();
+    expect(whole).not.toContain(token);
+  });
+});
+
+/** A no-KV env: rotation must not be hidden by a cached lookup. */
+function fakeKvUnbound(): undefined {
+  return undefined;
+}

@@ -60,7 +60,7 @@ const handleGET = async (req: NextApiRequest, res: NextApiResponse) => {
   res.status(200).json({
     data: routes.map((route) => ({
       ...route,
-      relayUrl: relayUrlFor(user.team.slug, route.slug),
+      relayUrl: relayUrlFor(user.team.slug, route.slug, route.ingestToken),
     })),
   });
 };
@@ -93,6 +93,6 @@ const handlePOST = async (req: NextApiRequest, res: NextApiResponse) => {
   recordMetric('route.created');
 
   res.status(201).json({
-    data: { ...route, relayUrl: relayUrlFor(user.team.slug, route.slug) },
+    data: { ...route, relayUrl: relayUrlFor(user.team.slug, route.slug, route.ingestToken) },
   });
 };

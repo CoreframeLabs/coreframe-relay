@@ -1,14 +1,25 @@
 import { Hono } from 'hono';
-import { RelayEnvelopeSchema, RouteSlugSchema, type RelayEnvelope } from '@coreframe-relay/types';
+import {
+  IngestTokenSchema,
+  RelayEnvelopeSchema,
+  RouteSlugSchema,
+  type RelayEnvelope,
+} from '@coreframe-relay/types';
 
-import { relayKey } from '../middleware/relayKey.js';
+import { timingSafeEqualStrings, verifyRelayKey } from '../middleware/relayKey.js';
 import { lookupRoute } from '../services/routeLookup.js';
 import { publishToQStash } from '../services/qstash.js';
 import { validateDestination } from '../services/ssrf.js';
 import type { AppEnv } from '../types/bindings.js';
 
 /**
- * POST /in/:teamSlug/:routeSlug — webhook ingestion — [RELAY-4].
+ * POST /in/:teamSlug/:routeSlug — legacy path, `X-Relay-Key` required — [RELAY-4].
+ * POST /in/:teamSlug/:routeSlug/:ingestToken — path credential, no header — [RELAY-57].
+ *
+ * Both are the same handler; the `ingestToken` path segment is optional. Auth is decided
+ * per-request: a valid path token OR a valid `X-Relay-Key` satisfies it, which is what
+ * "keep `X-Relay-Key` during the migration" means. Rotation revokes the old token
+ * without touching the shared header.
  *
  * The product promise is a sub-10ms acknowledgement, and the shape of this handler is
  * that promise: authenticate, look the route up, validate its destination, queue the
@@ -110,15 +121,25 @@ function log(event: string, fields: Record<string, unknown>): void {
   console.log(JSON.stringify({ level: 'info', event, ...fields }));
 }
 
+/**
+ * The two forms share one handler.
+ *
+ * `:ingestToken?` is Hono's optional-segment syntax: the same registration matches
+ * `/in/:teamSlug/:routeSlug` (legacy, header-authenticated) and
+ * `/in/:teamSlug/:routeSlug/:ingestToken` (path credential). Matching both here keeps
+ * every later check — routed status, SSRF, queue — in one place, and the 404 body is
+ * identical across all four failure modes, which is the property the response surface
+ * is built around.
+ */
 export const ingest = new Hono<AppEnv>()
-  // Auth first: an unauthenticated caller must not be able to make us do a route lookup,
-  // which is a subrequest to the dashboard and therefore free work at our expense.
-  .use('*', relayKey)
-  .post('/:teamSlug/:routeSlug', async (c) => {
+  .post('/:teamSlug/:routeSlug/:ingestToken?', async (c) => {
     const started = Date.now();
     const requestId = c.get('requestId');
     const teamSlug = c.req.param('teamSlug');
     const routeSlug = c.req.param('routeSlug');
+    // Raw segment; validated only AFTER the route row is known, because a malformed one
+    // answers 404 without a lookup and the string is never interpolated anywhere.
+    const presentedToken = c.req.param('ingestToken');
 
     // Shape-check both segments before spending a subrequest on them. A malformed slug
     // cannot match a real route, and it answers 404 rather than 400 for the same reason a
@@ -139,6 +160,55 @@ export const ingest = new Hono<AppEnv>()
     }
 
     const route = lookup.route;
+
+    /**
+     * [RELAY-57] Authentication, per request, in the arms the decision specified.
+     *
+     * Order matters deliberately.
+     *
+     *  1. If a path token was presented and a header was presented too, the header is
+     *     IGNORED: a request that can carry a URL credential carries no second one to
+     *     audit. Two valid credentials on one request is a misconfigured sender, and
+     *     answering based on whichever is checked first is a policy no one wrote down.
+     *  2. A presented path token is constant-time compared (SHA-256 digests,
+     *     `timingSafeEqualStrings`, RELAY-4). No early exit; the compare runs whether or
+     *     not the header is also valid.
+     *  3. Only when NO path token was presented does the legacy `X-Relay-Key` header run,
+     *     and it runs unchanged: same shared secret, same 401 shape, same timing.
+     *
+     * Failure is 404, never 401. A 401 tells a brute-forcer "the route EXISTS, come back
+     * with a better token"; a 404 tells them nothing. That asymmetry is the entire
+     * reason ingest-token auth lives here instead of in the `relayKey` middleware, which
+     * answers 401 and must not change during the migration.
+     */
+    if (presentedToken !== undefined) {
+      // A path-credentialed request never consults the header. The shared secret is not
+      // a fallback here — the token IS the credential.
+      const presentedValid =
+        IngestTokenSchema.safeParse(presentedToken).success &&
+        (await timingSafeEqualStrings(presentedToken, route.ingestToken));
+
+      if (!presentedValid) {
+        // One log line, never the token, never the presented segment. The routeId is
+        // present: the lookup already returned it and an internal log line is what an
+        // operator reaches for when a customer says "I rotated the token and it broke".
+        log('proxy.ingest.invalid_token', { requestId, routeId: route.routeId });
+        return c.json({ error: 'not found', requestId }, 404);
+      }
+    } else {
+      // ── Legacy path: X-Relay-Key, exactly as RELAY-4 specified it. ────────────
+      // This is the same middleware logic, inline rather than mounted, because the
+      // middleware cannot know which of the two arms the request arrived by. When the
+      // migration window ends, delete this branch and the route `.post()` above keeps
+      // working unchanged.
+      const auth = await verifyRelayKey(c.env, c.req.raw);
+      if (!auth.ok) {
+        if (auth.code === 'misconfigured') {
+          return c.json({ error: 'proxy not configured', requestId }, 503);
+        }
+        return c.json({ error: 'unauthorized', requestId }, 401);
+      }
+    }
 
     /**
      * A PAUSED route answers 404, not 403.

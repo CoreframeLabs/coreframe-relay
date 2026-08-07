@@ -66,6 +66,8 @@ export type AppEvent =
   | 'route.removed'
   | 'route.paused'
   | 'route.resumed'
+  // ── Relay [RELAY-57] — ingest token rotation. Audit metadata never carries the token. ──
+  | 'route.token_rotated'
   // ── Relay [RELAY-5] — one per terminal state of a delivery attempt ──
   | 'delivery.delivered'
   | 'delivery.retrying'

@@ -121,6 +121,8 @@ describe('@coreframe-relay/types resolves from the worker', () => {
       slug: 'stripe',
       maxRetries: 7,
       status: 'ACTIVE',
+      // [RELAY-57] — the schema now requires a well-formed ingest token on a Route.
+      ingestToken: 'A'.repeat(32),
       createdAt: '2026-08-03T00:00:00.000Z',
       updatedAt: '2026-08-03T00:00:00.000Z',
     };

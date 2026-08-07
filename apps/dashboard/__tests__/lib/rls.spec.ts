@@ -93,6 +93,7 @@ describeIfConfigured('[RELAY-39] RLS is enforced by Postgres, not by Prisma', ()
           name: 'A',
           slug: `a-${RUN}`,
           destination: 'https://a.example.com/hook',
+          ingestToken: `rls-test-token-a-${RUN}`,
         },
       })
     );
@@ -104,6 +105,7 @@ describeIfConfigured('[RELAY-39] RLS is enforced by Postgres, not by Prisma', ()
           name: 'B',
           slug: `b-${RUN}`,
           destination: 'https://b.example.com/hook',
+          ingestToken: `rls-test-token-b-${RUN}`,
         },
       })
     );
@@ -241,6 +243,7 @@ describeIfConfigured('[RELAY-39] RLS is enforced by Postgres, not by Prisma', ()
               name: 'smuggled',
               slug: `smuggled-${RUN}`,
               destination: 'https://evil.example.com/hook',
+              ingestToken: `rls-test-token-smuggled-${RUN}`,
             },
           })
         )

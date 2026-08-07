@@ -1,5 +1,6 @@
 import { prisma } from '@/lib/prisma';
 import { ApiError } from '@/lib/errors';
+import { generateIngestToken } from '@/lib/relay/ingestToken';
 import type { Prisma, Route, RouteStatus } from '@prisma/client';
 
 /**
@@ -67,13 +68,19 @@ export async function fetchRoute(
  * The `select` is the response contract, not a convenience. The proxy is the least
  * trusted component in the system, so it receives the five fields ingestion needs and no
  * team name, plan, or sibling route.
+ *
+ * [RELAY-57] `ingestToken` is selected so the PROXY can run its constant-time digest
+ * compare against the caller's path segment. Contract rationale lives on the schema in
+ * `packages/types/src/internal.ts`; the short version is "dashboard-side compare would
+ * put the raw token on an internal wire the proxy controls, so it is compared
+ * proxy-side and never re-transmitted".
  */
 export async function fetchRouteBySlugs(
   teamSlug: string,
   routeSlug: string
 ): Promise<Pick<
   Route,
-  'id' | 'teamId' | 'destination' | 'maxRetries' | 'status'
+  'id' | 'teamId' | 'destination' | 'maxRetries' | 'status' | 'ingestToken'
 > | null> {
   return prisma.route.findFirst({
     where: { slug: routeSlug, team: { slug: teamSlug } },
@@ -83,6 +90,7 @@ export async function fetchRouteBySlugs(
       destination: true,
       maxRetries: true,
       status: true,
+      ingestToken: true,
     },
   });
 }
@@ -132,8 +140,33 @@ export async function createRoute(params: {
       slug,
       destination: params.destination,
       maxRetries: params.maxRetries,
+      // [RELAY-57] generated at create, never defaulted by the ORM.
+      ingestToken: generateIngestToken(),
     },
   });
+}
+
+/**
+ * Issue a fresh ingest token for a route, revoking the old one — [RELAY-57].
+ *
+ * updateMany on `{ id, teamId }` for the same IDOR reason as `updateRoute`. There is no
+ * grace period: a token rotates because someone believes it is compromised, and a
+ * "keep the old one working" window is precisely the window the compromise exploits.
+ * Senders gripping the old URL start failing with the next request — by design.
+ */
+export async function rotateIngestToken(
+  teamId: string,
+  id: string
+): Promise<Route> {
+  const { count } = await prisma.route.updateMany({
+    where: { id, teamId },
+    data: { ingestToken: generateIngestToken() },
+  });
+  if (count === 0) throw new ApiError(404, 'Route not found.');
+
+  const route = await fetchRoute(teamId, id);
+  if (!route) throw new ApiError(404, 'Route not found.');
+  return route;
 }
 
 export async function updateRoute(
@@ -165,11 +198,19 @@ export async function deleteRoute(teamId: string, id: string): Promise<void> {
  * Built from an env var rather than the request host: the proxy is a different origin
  * from the dashboard, and deriving it from `req.headers.host` would emit a dashboard URL
  * that accepts no webhooks.
+ *
+ * [RELAY-57] The path carries the route's ingest token; the URL is the whole credential
+ * a sender needs. Derived here, server-side, from the record — never reconstructed
+ * client-side from parts, and never echoed in a log line.
  */
-export function relayUrlFor(teamSlug: string, routeSlug: string): string {
+export function relayUrlFor(
+  teamSlug: string,
+  routeSlug: string,
+  ingestToken: string
+): string {
   const base = (process.env.RELAY_PROXY_URL || 'http://localhost:8787').replace(
     /\/+$/,
     ''
   );
-  return `${base}/in/${teamSlug}/${routeSlug}`;
+  return `${base}/in/${teamSlug}/${routeSlug}/${ingestToken}`;
 }
