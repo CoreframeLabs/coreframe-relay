@@ -22,7 +22,13 @@ import { createUser, getUser } from 'models/user';
 import { verifyPassword } from '@/lib/auth';
 import { isEmailAllowed } from '@/lib/email/utils';
 import env from '@/lib/env';
-import { prisma } from '@/lib/prisma';
+// [RELAY-39] Deliberately the UNSCOPED client, not the `prisma` export. NextAuth
+// runs before any team exists — there is no team scope at login time — and the
+// adapter only ever touches `User`, `Session`, `Account` and
+// `VerificationToken`, none of which are RLS-protected. Passing the extended
+// client would also require the cast lib/prisma.ts documents, which this change
+// removes the need for.
+import { unscopedPrisma } from '@/lib/prisma';
 import { isAuthProviderEnabled } from '@/lib/auth';
 import { validateRecaptcha } from '@/lib/recaptcha';
 import { sendMagicLink } from '@/lib/email/sendMagicLink';
@@ -35,7 +41,7 @@ import { slackNotify } from './slack';
 import { maxLengthPolicies } from '@/lib/common';
 import { forceConsume } from '@/lib/server-common';
 
-const adapter = PrismaAdapter(prisma);
+const adapter = PrismaAdapter(unscopedPrisma);
 const providers: Provider[] = [];
 const sessionMaxAge = 14 * 24 * 60 * 60; // 14 days
 const useSecureCookie = env.appUrl.startsWith('https://');

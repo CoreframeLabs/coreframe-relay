@@ -2,6 +2,7 @@ import type { NextApiRequest, NextApiResponse } from 'next';
 import { getCurrentUserWithTeam, throwIfNoTeamAccess } from 'models/team';
 import { throwIfNotAllowed } from 'models/user';
 import { fetchDlqItemsForTeam } from 'models/dlq';
+import { withTeamScope } from '@/lib/db/scope';
 
 /**
  * GET /api/teams/:slug/relay/dlq — every DLQ item for the team, newest first. [RELAY-8]
@@ -30,9 +31,14 @@ export default async function handler(
   res: NextApiResponse
 ) {
   try {
-    await throwIfNoTeamAccess(req, res);
+    const teamMember = await throwIfNoTeamAccess(req, res);
 
-    switch (req.method) {
+    // [RELAY-39] Every query the handlers below make must run inside the RLS
+    // team scope, or the six protected tables return zero rows once the app
+    // connects as `relay_app`. The id comes from the membership this check just
+    // verified — never from the request.
+    await withTeamScope(teamMember.teamId, async () => {
+      switch (req.method) {
       case 'GET':
         await handleGET(req, res);
         break;
@@ -41,7 +47,8 @@ export default async function handler(
         res.status(405).json({
           error: { message: `Method ${req.method} Not Allowed` },
         });
-    }
+      }
+    });
   } catch (error: any) {
     const message = error.message || 'Something went wrong';
     const status = error.status || 500;

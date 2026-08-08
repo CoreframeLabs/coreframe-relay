@@ -13,6 +13,7 @@ import {
   releaseDlqRetryClaim,
 } from 'models/dlq';
 import { recordAuditEvent } from '@/lib/audit';
+import { withTeamScope } from '@/lib/db/scope';
 // The ONE line [RELAY-33] swaps for the shared package, exactly as `lib/relay/forward.ts`
 // does it. Read `lib/relay/ssrfGap.ts` before treating this call as protection: today it
 // is shape-only. It is imported anyway — and deliberately not re-implemented here —
@@ -164,9 +165,14 @@ export default async function handler(
   res: NextApiResponse
 ) {
   try {
-    await throwIfNoTeamAccess(req, res);
+    const teamMember = await throwIfNoTeamAccess(req, res);
 
-    switch (req.method) {
+    // [RELAY-39] Every query the handler below makes must run inside the RLS
+    // team scope, or the six protected tables return zero rows once the app
+    // connects as `relay_app`. The id comes from the membership this check just
+    // verified — never from the request.
+    await withTeamScope(teamMember.teamId, async () => {
+      switch (req.method) {
       case 'POST':
         await handlePOST(req, res);
         break;
@@ -175,7 +181,8 @@ export default async function handler(
         res.status(405).json({
           error: { message: `Method ${req.method} Not Allowed` },
         });
-    }
+      }
+    });
   } catch (error: any) {
     const message = error.message || 'Something went wrong';
     const status = error.status || 500;

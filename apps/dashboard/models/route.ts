@@ -1,4 +1,5 @@
-import { prisma } from '@/lib/prisma';
+import { prisma, unscopedPrisma } from '@/lib/prisma';
+import { withTeamScope } from '@/lib/db/scope';
 import { ApiError } from '@/lib/errors';
 import { generateIngestToken } from '@/lib/relay/ingestToken';
 import type { Prisma, Route, RouteStatus } from '@prisma/client';
@@ -82,17 +83,33 @@ export async function fetchRouteBySlugs(
   Route,
   'id' | 'teamId' | 'destination' | 'maxRetries' | 'status' | 'ingestToken'
 > | null> {
-  return prisma.route.findFirst({
-    where: { slug: routeSlug, team: { slug: teamSlug } },
-    select: {
-      id: true,
-      teamId: true,
-      destination: true,
-      maxRetries: true,
-      status: true,
-      ingestToken: true,
-    },
+  // [RELAY-39 wiring] Under the combined filter, RLS on `Route` applies to the
+  // Route-side of the implicit JOIN, so once `DATABASE_URL` points at
+  // `relay_app` the old form returned NULL unless the ambient scope happened to
+  // match — which here is never. Resolve `Team` by slug first (Team has no RLS
+  // policy, so the unscoped client answers honestly), then look the route up
+  // inside a `withTeamScope` derived from THAT row — the database, never the
+  // request. A bogus slug still 404s because the team does not resolve.
+  const team = await unscopedPrisma.team.findUnique({
+    where: { slug: teamSlug },
+    select: { id: true },
   });
+  if (!team) {
+    return null;
+  }
+  return withTeamScope(team.id, () =>
+    prisma.route.findFirst({
+      where: { slug: routeSlug, teamId: team.id },
+      select: {
+        id: true,
+        teamId: true,
+        destination: true,
+        maxRetries: true,
+        status: true,
+        ingestToken: true,
+      },
+    })
+  );
 }
 
 export async function createRoute(params: {
