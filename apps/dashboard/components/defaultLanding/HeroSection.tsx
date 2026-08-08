@@ -10,7 +10,7 @@ import { LandingLink } from './LandingPrimitives';
 import RelayFlowDiagram from './RelayFlowDiagram';
 
 const HeroSection = () => (
-  <section className="relative overflow-hidden">
+  <section id="how-it-works" className="relative scroll-mt-16 overflow-hidden">
     {/* Decorative only; carries no meaning, so it is hidden from assistive tech. */}
     <div
       aria-hidden="true"
