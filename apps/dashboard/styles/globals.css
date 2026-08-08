@@ -87,6 +87,78 @@ a {
   display: none;
 }
 
+/* [RELAY-64] Landing flow-diagram wires + reduced-motion.
+ *
+ * The wires are plain elements (not borders) so they can carry a sliding pulse
+ * via background-position. All motion sits behind the same media query as every
+ * other animation: `prefers-reduced-motion: reduce` switches it off wholesale,
+ * leaving a static wire rather than a frozen mid-frame. */
+.relay-wire-x,
+.relay-wire-y {
+  @apply block shrink-0 rounded-full;
+  background-image: linear-gradient(
+    to right,
+    var(--tw-gradient-from, theme('colors.violet.500')),
+    theme('colors.zinc.700')
+  );
+}
+
+.relay-wire-x {
+  @apply h-px w-full;
+  background: repeating-linear-gradient(
+    to right,
+    theme('colors.zinc.700'),
+    theme('colors.zinc.700') 6px,
+    theme('colors.violet.500') 6px,
+    theme('colors.violet.500') 8px
+  );
+}
+
+.relay-wire-y {
+  @apply h-6 w-px;
+  background: repeating-linear-gradient(
+    to bottom,
+    theme('colors.zinc.700'),
+    theme('colors.zinc.700') 6px,
+    theme('colors.violet.500') 6px,
+    theme('colors.violet.500') 8px
+  );
+}
+
+@keyframes relay-wire-pulse-x {
+  from {
+    background-position: 0 0;
+  }
+  to {
+    background-position: 32px 0;
+  }
+}
+
+@keyframes relay-wire-pulse-y {
+  from {
+    background-position: 0 0;
+  }
+  to {
+    background-position: 0 32px;
+  }
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  .relay-wire-animated.relay-wire-x {
+    animation: relay-wire-pulse-x 1.6s linear infinite;
+  }
+
+  .relay-wire-animated.relay-wire-y {
+    animation: relay-wire-pulse-y 1.6s linear infinite;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .relay-wire-animated {
+    animation: none;
+  }
+}
+
 /* ─────────────────────────────────────────────────────────────────────────────
  * shadcn/ui — zinc base, CSS variables. Added in [RELAY-1].
  *

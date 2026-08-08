@@ -70,7 +70,7 @@ const RelayFlowDiagram = () => (
       <pre className="font-mono text-xs leading-6 text-zinc-300">
         <code>
           <span className="text-zinc-500">$</span> curl -X POST
-          https://…/in/<span className="text-violet-300">acme</span>/
+          https://relay.example/in/<span className="text-violet-300">acme</span>/
           <span className="text-violet-300">orders</span>/
           <span className="text-violet-300">&#123;ingest-token&#125;</span> -d @event.json{'\n'}
           <span className="text-emerald-400">200</span>{' '}

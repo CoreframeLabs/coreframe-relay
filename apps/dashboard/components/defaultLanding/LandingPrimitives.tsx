@@ -67,7 +67,7 @@ type SectionProps = {
 };
 
 export const Section = ({ id, children, className = '' }: SectionProps) => (
-  <section id={id} className={`border-t border-zinc-800/80 ${className}`}>
+  <section id={id} className={`scroll-mt-16 border-t border-zinc-800/80 ${className}`}>
     <div className="mx-auto w-full max-w-6xl px-5 py-16 sm:px-8 sm:py-24">
       {children}
     </div>
