@@ -278,8 +278,21 @@ model Route {
   /// The unique constraint doubles as the rotation index — proxies accept by path
   /// token, never by scanning.
   ingestToken String       @unique
-  createdAt   DateTime    @default(now()) @db.Timestamptz(6)
-  updatedAt   DateTime    @updatedAt @db.Timestamptz(6)
+  /// Customer-configured auth headers for the destination ([RELAY-59]), encrypted at
+  /// rest with the app-level `RELAY_DESTINATION_HEADERS_KEY`. Shape: a JSON map of
+  /// header name → per-value AES-256-GCM envelope (`{ iv, ct, tag }`, base64), produced
+  /// by `lib/relay/destinationAuth.ts`. NOT decrypted until `qstash.ts` is about to
+  /// forward, and NEVER returned from an API in any form — a set-value only ever comes
+  /// back as its name. A DB dump alone therefore yields no usable customer token.
+  /// Threat model + key rotation live on the writer/reader in
+  /// `lib/relay/destinationAuth.ts` — do not re-derive it here.
+  ///
+  /// NULL rather than a default so a route with no headers configured carries no crypto
+  /// material at all, and a decryption bug never fires on a route that has nothing to
+  /// protect.
+  destinationHeadersEncrypted Json?
+  createdAt                    DateTime      @default(now()) @db.Timestamptz(6)
+  updatedAt                    DateTime      @updatedAt @db.Timestamptz(6)
 
   team         Team          @relation(fields: [teamId], references: [id], onDelete: Cascade)
   deliveryLogs DeliveryLog[]

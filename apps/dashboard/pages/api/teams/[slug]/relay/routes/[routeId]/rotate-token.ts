@@ -59,8 +59,20 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     // a revoked secret, an intermediary holding the new one is the leak.
     res.setHeader('Cache-Control', 'no-store');
     return res.status(200).json({
+      // Hand-built, never `{ ...route }`: that row now carries `destinationHeadersEncrypted`
+      // (RELAY-59) and spreading it would ship ciphertext to a client that has no use
+      // for it and no protection for it. Fields listed one at a time so a new column
+      // defaults to NOT being exposed.
       data: {
-        ...route,
+        id: route.id,
+        teamId: route.teamId,
+        name: route.name,
+        slug: route.slug,
+        destination: route.destination,
+        maxRetries: route.maxRetries,
+        status: route.status,
+        createdAt: route.createdAt,
+        updatedAt: route.updatedAt,
         relayUrl: relayUrlFor(user.team.slug, route.slug, route.ingestToken),
       },
     });

@@ -68,6 +68,10 @@ export type AppEvent =
   | 'route.resumed'
   // ── Relay [RELAY-57] — ingest token rotation. Audit metadata never carries the token. ──
   | 'route.token_rotated'
+  // ── Relay [RELAY-59] — destination auth headers. Metadata carries the NAMES set,
+  // never a value, never a ciphertext. See pages/api/.../destination-headers.ts. ──
+  | 'route.destination_headers_set'
+  | 'route.destination_headers_cleared'
   // ── Relay [RELAY-5] — one per terminal state of a delivery attempt ──
   | 'delivery.delivered'
   | 'delivery.retrying'
