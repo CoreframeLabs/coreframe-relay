@@ -412,3 +412,54 @@ mechanical change across files that belong to other agents' tickets right now:
 
 Until step 4, the six tables remain exactly what RELAY-11 left them: enforced
 against every path except the app's own.
+
+## Wiring step status [AGENT-21, 2026-08-08]
+
+Steps 1–3 and 5 are now WIRED (commit b655acd); only step 4 remains, and it is
+the director's call because production takes real signups.
+
+1. **DLQ handlers wrapped.** Both handlers under
+   `pages/api/teams/[slug]/relay/dlq/` (the listing `index.ts` and
+   `[id]/retry.ts`) now capture the `TeamMember` `throwIfNoTeamAccess` already
+   returned and run every handler branch inside
+   `withTeamScope(teamMember.teamId, ...)`. The id comes from the verified
+   membership, never the request.
+2. **`fetchRouteBySlugs` resolves-then-scopes.** It first looks the `Team` up
+   by slug with the unscoped client (`Team` carries no RLS policy, so this is
+   honest under `relay_app`), then runs the `Route` lookup inside
+   `withTeamScope(team.id, ...)`. A bogus slug is still a 404. The other caller
+   (`test-send.ts`) uses the same function; its use remains a second,
+   independent verification of route existence and still works.
+3. **The QStash consumer path is scoped AFTER the assert.**
+   `lib/relay/consume.ts` (the shared delivery half used by both
+   `pages/api/relay/qstash.ts` and the local test endpoint) wraps its whole
+   record/forward/DLQ section in `withTeamScope(teamId, ...)`, and the wrap sits
+   strictly after `assertRouteBelongsToTeam`. Wrapping on the envelope's claim
+   before the database has confirmed the pair would mean the claim IS the
+   scope; the assert exists precisely to stop that.
+5. **`lib/nextAuth.ts` takes `unscopedPrisma`.** `PrismaAdapter` now receives
+   the un-extended client directly, which removes the cast `lib/prisma.ts` was
+   carrying for it. Correct on both grounds: no team exists at login time, and
+   the adapter only ever touches `User`/`Session`/`Account`/
+   `VerificationToken`, none of which have RLS policies.
+
+### The open SSE question, measured
+
+`pages/api/teams/[slug]/relay/log-stream.ts` **polls; it does not hold a
+transaction.** Read and confirmed: the handler issues one initial
+`fetchTeamDeliveryFeed` query before the stream opens, then schedules
+`setTimeout(() => void tick(), 2000)` and each `tick()` calls
+`fetchTeamDeliveryFeed` again as a brand-new statement. Nothing holds a Prisma
+transaction across the seconds the connection is open — the long-lived part of
+the endpoint is the HTTP response, not a database transaction.
+
+That is exactly the shape the scoped-client extension needs: every poll is a
+fresh `$transaction([set_config, query])`, the `SET LOCAL` applies for that
+transaction and is gone at COMMIT, and the existing rls.spec assertion 12
+("keeps the scope inside chained timer callbacks (the SSE poll shape) —
+300 sequential ticks, 0 cross-tenant") proves AsyncLocalStorage itself
+survives the chained-`setTimeout` pattern this endpoint uses. **Conclusion:
+poll-pattern-safe. No fix made or required.**
+
+(For completeness: the same file's diff already passes the scope's own
+concurrency test — 30 interleaved scoped queries share nothing, 0 leaks.)
