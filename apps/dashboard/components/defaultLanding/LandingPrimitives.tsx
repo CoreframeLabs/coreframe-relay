@@ -1,5 +1,5 @@
 /**
- * [RELAY-64] Shared building blocks for the public landing page.
+ * [RELAY-64 v2] Shared building blocks for the public landing page.
  *
  * These live under `components/defaultLanding/**` on purpose: that path is already
  * exempt from `i18next/no-literal-string` in `eslint.config.cjs` (alongside
@@ -7,19 +7,24 @@
  * `components/landing/**` namespace would NOT be exempt and would fail `check-lint`
  * once per string — and `eslint.config.cjs` is outside this ticket's file boundary.
  *
- * The page commits to a single dark surface rather than following the daisyUI theme
- * toggle, per `relay-ui-ux-spec.md` §1.1 ("Dark Mode Primary", zinc neutrals, violet
- * brand, colour used only to convey status). Colours are written as explicit zinc/violet
- * utilities instead of the shadcn `--background` variables, because the landing route
- * renders under `data-theme="boxyhq"` without the `.dark` class and would otherwise
- * resolve to the light palette.
+ * v2 token pass per `relay-landing-design.md` §4: coreframe-website colour VALUES
+ * mapped onto the existing zinc utility STRUCTURE — page `bg-[#0d0f12]`, cards
+ * `bg-[#191b20]`/60, hairlines `border-[#24262c]`, headings `text-[#f2f3f5]`, body
+ * `text-[#9a9ea8]`, primary accent teal, amber #fb923c keeps the "gap" meaning,
+ * emerald stays delivered-only. Values are inline arbitrary utilities, NOT a
+ * tailwind.config change [AGENT-22 conservative-default, director may reverse]:
+ * the app-wide token cascade stays out of scope.
+ *
+ * The page still commits to a single dark surface rather than following the daisyUI
+ * theme toggle — explicit hex utilities resolve identically with or without the
+ * `.dark` class on the landing route, which renders under `data-theme="boxyhq"`.
  */
 import Link from 'next/link';
 import type { ReactNode } from 'react';
 
 /** Shared focus treatment. Visible on every interactive element, on a dark surface. */
 export const focusRing =
-  'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-violet-400 focus-visible:ring-offset-2 focus-visible:ring-offset-zinc-950';
+  'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-teal-400 focus-visible:ring-offset-2 focus-visible:ring-offset-[#0d0f12]';
 
 type LandingLinkProps = {
   href: string;
@@ -31,6 +36,11 @@ type LandingLinkProps = {
 /**
  * Deliberately not daisyUI's `.btn` — `styles/globals.css` restyles that class app-wide
  * and the landing page should not inherit dashboard chrome.
+ *
+ * Contrast per the panel's method (relay-landing-design.md §5): teal accent bg-teal-600
+ * with dark ink text-[#04120f] measures ≈7.5:1 — above the 5.7:1 bar set by v1's
+ * violet-600 CTA. The lighter hover step keeps the same dark ink: accent-on-hover is
+ * the website's pattern, not a white-foreground variant (white on teal fails AA).
  */
 export const LandingLink = ({
   href,
@@ -40,12 +50,10 @@ export const LandingLink = ({
 }: LandingLinkProps) => {
   const base = `inline-flex items-center justify-center gap-2 rounded-md px-5 py-3 text-sm font-semibold transition-colors ${focusRing}`;
 
-  // violet-600 rather than violet-500: white on #7c3aed measures 5.7:1, white on
-  // #8b5cf6 measures 4.1:1 and fails WCAG AA for normal text.
   const styles =
     variant === 'primary'
-      ? 'bg-violet-600 text-white hover:bg-violet-500'
-      : 'border border-zinc-700 bg-zinc-900 text-zinc-100 hover:border-zinc-500 hover:bg-zinc-800';
+      ? 'bg-teal-600 text-[#04120f] hover:bg-teal-500'
+      : 'border border-[#24262c] bg-[#191b20] text-[#f2f3f5] hover:border-zinc-500 hover:bg-[#22242b]';
 
   return (
     <Link href={href} className={`${base} ${styles} ${className}`}>
@@ -55,7 +63,7 @@ export const LandingLink = ({
 };
 
 export const Eyebrow = ({ children }: { children: ReactNode }) => (
-  <p className="mb-3 font-mono text-xs uppercase tracking-[0.18em] text-violet-400">
+  <p className="mb-3 font-mono text-xs uppercase tracking-[0.18em] text-teal-300">
     {children}
   </p>
 );
@@ -67,7 +75,7 @@ type SectionProps = {
 };
 
 export const Section = ({ id, children, className = '' }: SectionProps) => (
-  <section id={id} className={`scroll-mt-16 border-t border-zinc-800/80 ${className}`}>
+  <section id={id} className={`scroll-mt-16 border-t border-[#24262c]/80 ${className}`}>
     <div className="mx-auto w-full max-w-6xl px-5 py-16 sm:px-8 sm:py-24">
       {children}
     </div>
@@ -85,11 +93,11 @@ export const SectionHeading = ({
 }) => (
   <div className="max-w-3xl">
     <Eyebrow>{eyebrow}</Eyebrow>
-    <h2 className="text-balance text-2xl font-semibold tracking-tight text-zinc-50 sm:text-3xl">
+    <h2 className="text-balance font-display text-2xl font-semibold tracking-tight text-[#f2f3f5] sm:text-3xl">
       {title}
     </h2>
     {lede ? (
-      <p className="mt-4 text-base leading-relaxed text-zinc-400">{lede}</p>
+      <p className="mt-4 text-base leading-relaxed text-[#9a9ea8]">{lede}</p>
     ) : null}
   </div>
 );
@@ -102,7 +110,7 @@ export const Card = ({
   className?: string;
 }) => (
   <div
-    className={`rounded-xl border border-zinc-800 bg-zinc-900/60 p-5 sm:p-6 ${className}`}
+    className={`rounded-xl border border-[#24262c] bg-[#191b20]/60 p-5 sm:p-6 ${className}`}
   >
     {children}
   </div>
@@ -110,7 +118,8 @@ export const Card = ({
 
 /**
  * Status chip. Colour is never the only signal — every chip also carries its own word,
- * per `relay-ui-ux-spec.md` §7.
+ * per `relay-ui-ux-spec.md` §7. Amber is `text-amber-400` (#fbbf24 ≈ #fb923c kept as
+ * the "gap" meaning); emerald is built/delivered only.
  */
 export const StatusChip = ({
   tone,
@@ -122,7 +131,7 @@ export const StatusChip = ({
   const tones = {
     built: 'border-emerald-500/40 bg-emerald-500/10 text-emerald-300',
     planned: 'border-zinc-600 bg-zinc-800 text-zinc-300',
-    gap: 'border-amber-500/40 bg-amber-500/10 text-amber-300',
+    gap: 'border-amber-500/40 bg-amber-500/10 text-amber-400',
   } as const;
 
   return (

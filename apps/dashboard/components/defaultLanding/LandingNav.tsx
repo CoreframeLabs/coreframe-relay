@@ -1,17 +1,20 @@
-/** [RELAY-64] Public landing navigation. */
+/** [RELAY-64 v2] Public landing navigation. */
 import Link from 'next/link';
 
 import { LandingLink, focusRing } from './LandingPrimitives';
 
 const navLinks = [
-  { href: '#how-it-works', label: 'How it works' },
+  { href: '#proof', label: 'Proof' },
   { href: '#what-it-does', label: 'What it does' },
+  { href: '#how-it-works', label: 'How it works' },
+  { href: '#pricing', label: 'Pricing' },
   { href: '#limits', label: 'Limits' },
   { href: '#roadmap', label: 'Roadmap' },
 ];
 
 const LandingNav = () => (
-  <header className="sticky top-0 z-20 border-b border-zinc-800/80 bg-zinc-950/90 backdrop-blur">
+  /* Glass allowed on the sticky nav only (contract §5). */
+  <header className="sticky top-0 z-20 border-b border-[#24262c]/80 bg-[#0d0f12]/90 backdrop-blur">
     <nav
       aria-label="Primary"
       className="mx-auto flex w-full max-w-6xl items-center gap-4 px-5 py-3 sm:px-8"
@@ -23,9 +26,9 @@ const LandingNav = () => (
       >
         <span
           aria-hidden="true"
-          className="h-5 w-1.5 shrink-0 rounded-full bg-violet-500"
+          className="h-5 w-1.5 shrink-0 rounded-full bg-teal-400"
         />
-        <span className="text-sm font-semibold tracking-tight text-zinc-50">
+        <span className="font-display text-sm font-semibold tracking-tight text-[#f2f3f5]">
           Coreframe Relay
         </span>
       </Link>
@@ -35,7 +38,7 @@ const LandingNav = () => (
           <li key={link.href}>
             <a
               href={link.href}
-              className={`rounded text-sm text-zinc-400 transition-colors hover:text-zinc-100 ${focusRing}`}
+              className={`rounded text-sm text-[#9a9ea8] transition-colors hover:text-zinc-100 ${focusRing}`}
             >
               {link.label}
             </a>
@@ -51,7 +54,7 @@ const LandingNav = () => (
           Sign in
         </Link>
         <LandingLink href="/auth/join" className="!px-4 !py-2">
-          Create account
+          Start the 14-day trial
         </LandingLink>
       </div>
     </nav>
