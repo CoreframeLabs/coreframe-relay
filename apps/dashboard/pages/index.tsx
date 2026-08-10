@@ -23,12 +23,14 @@ import Head from 'next/head';
 import type { ReactElement } from 'react';
 
 import HeroSection from '@/components/defaultLanding/HeroSection';
+import GapSection from '@/components/defaultLanding/GapSection';
+import LandingFooter from '@/components/defaultLanding/LandingFooter';
 import LandingNav from '@/components/defaultLanding/LandingNav';
 import LimitsSection from '@/components/defaultLanding/LimitsSection';
-import ProblemSection from '@/components/defaultLanding/ProblemSection';
+import PricingSection from '@/components/defaultLanding/PricingSection';
+import ProofSection from '@/components/defaultLanding/ProofSection';
 import RoadmapSection from '@/components/defaultLanding/RoadmapSection';
 import WhatItDoesSection from '@/components/defaultLanding/WhatItDoesSection';
-import { LandingLink } from '@/components/defaultLanding/LandingPrimitives';
 import env from '@/lib/env';
 import type { NextPageWithLayout } from 'types';
 
@@ -36,46 +38,34 @@ const LandingPage: NextPageWithLayout = () => {
   return (
     <>
       <Head>
-        <title>Coreframe Relay — Webhooks that survive a slow endpoint</title>
+        <title>
+          Coreframe Relay — Know which webhooks never arrived, and get them back
+        </title>
         <meta
           name="description"
-          content="Relay accepts webhooks at the edge, answers the sender straight away, then keeps delivering to your endpoint with backoff until it lands."
+          content="Relay sits in front of your endpoint, counts every webhook the moment it lands, and re-sends the ones that fail — so a restart, a crash or a busy spell is never a silent loss."
         />
       </Head>
 
-      {/* One committed dark surface, zinc neutrals, violet for the Relay accent and
-          for nothing that merely wants attention. The wrapper — not a theme class —
-          carries it, so the route is dark with or without the `.dark` toggle. */}
-      <div className="min-h-screen bg-zinc-950 text-zinc-100 antialiased">
+      {/* Contract §4 token pass: page adopts coreframe-website's palette values as
+          arbitrary-value Tailwind classes over the existing utility structure.
+          `bg-[#0d0f12]` page, `text-[#f2f3f5]` headings, `text-[#9a9ea8]` body,
+          teal accent (primary CTA `bg-teal-600 text-[#04120f]`, focus `ring-teal-400`).
+          The wrapper carries the dark surface so the route is dark regardless of
+          the daisyUI theme toggle's `.dark` class. */}
+      <div className="min-h-screen bg-[#0d0f12] text-[#9a9ea8] antialiased">
         <LandingNav />
         <main>
+          {/* Contract §3 section order: Hero (incl. Gap) → Proof → Product → How-it-works → Pricing/CTA → Footer. RELAY-55: every section sells the phase that exists — Buffer — and nothing else. */}
           <HeroSection />
-          <ProblemSection />
+          <ProofSection />
           <WhatItDoesSection />
+          <GapSection />
           <LimitsSection />
           <RoadmapSection />
+          <PricingSection />
         </main>
-
-        <footer className="border-t border-zinc-800/80">
-          <div className="mx-auto flex w-full max-w-6xl flex-col gap-6 px-5 py-12 sm:px-8 md:flex-row md:items-end md:justify-between">
-            <div className="max-w-md">
-              <p className="text-sm font-semibold text-zinc-50">
-                Coreframe Relay
-              </p>
-              <p className="mt-2 text-sm leading-relaxed text-zinc-400">
-                Phase 1 of 3 (Buffer) is built and running. No customers yet, so no
-                logos, no testimonials and no invented numbers on this page — the
-                sections above are the honest state of the product.
-              </p>
-            </div>
-            <div className="flex flex-col items-start gap-3 sm:flex-row sm:items-center">
-              <LandingLink href="/auth/join">Create an account</LandingLink>
-              <LandingLink href="/auth/login" variant="secondary">
-                Sign in
-              </LandingLink>
-            </div>
-          </div>
-        </footer>
+        <LandingFooter />
       </div>
     </>
   );
