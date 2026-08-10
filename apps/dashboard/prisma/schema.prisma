@@ -320,6 +320,11 @@ model DeliveryLog {
   responseCode Int?
   latencyMs    Int?
   payloadSizeB Int?
+  /// [RELAY-50] True when this delivery was produced by the "Send test webhook"
+  /// button rather than by an external sender. Drives the TEST badge in the feed
+  /// and the exclusion from billing/usage counters (RELAY-12 owns the counter;
+  /// this flag is the hook it filters on). False for all historical rows.
+  isTest       Boolean        @default(false)
   createdAt    DateTime       @default(now()) @db.Timestamptz(6)
   deliveredAt  DateTime?      @db.Timestamptz(6)
 

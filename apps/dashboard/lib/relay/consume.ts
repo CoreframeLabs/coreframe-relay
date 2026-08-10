@@ -26,8 +26,21 @@ export async function consumeEnvelope(
   retriedRaw: number,
   res: NextApiResponse
 ) {
-  const { requestId, routeId, teamId, destination, maxRetries, headers, body, isTest } =
-    envelope;
+  const {
+    requestId,
+    routeId,
+    teamId,
+    destination,
+    maxRetries,
+    headers,
+    body,
+    // Default is defensive, kept in code rather than relying on the schema having
+    // already populated it: an envelope that reached here without being parsed by
+    // RelayEnvelopeSchema (a reproducer, an integration test, a future caller)
+    // defaults to REAL, never to TEST — the bias that makes a forged test marker
+    // count as real traffic, never the other way around.
+    isTest = false,
+  } = envelope;
 
   const retriesSoFar = Number.isFinite(retriedRaw) && retriedRaw >= 0 ? retriedRaw : 0;
   const attemptCount = retriesSoFar + 1;

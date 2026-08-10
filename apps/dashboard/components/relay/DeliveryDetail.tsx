@@ -101,8 +101,16 @@ export function DeliveryDetail({
           {row && (
             <dl className="mt-2">
               <Field label="Status">
-                <StatusBadge state={row.status as BadgeState} />
+                <div className="flex items-center justify-end gap-1.5">
+                  <StatusBadge state={row.status as BadgeState} />
+                  {row.isTest && <StatusBadge state="TEST" />}
+                </div>
               </Field>
+              {row.isTest && (
+                <Field label="Origin">
+                  Test webhook (button) — synthetic
+                </Field>
+              )}
               {/*
               Not `CopyableUrl`: its aria-label is hard-coded to "Copy relay URL …", which
               would announce a request id as a URL. That component is outside this ticket's

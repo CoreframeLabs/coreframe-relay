@@ -142,6 +142,24 @@ describe('@coreframe-relay/types resolves from the worker', () => {
       headers: { 'content-type': 'application/json' },
       body: '{"ok":true}',
     };
-    expect(RelayEnvelopeSchema.parse(envelope)).toEqual(envelope);
+    // [RELAY-50] `isTest` is defaulted, so a legacy envelope that omits it parses as
+    // `{ ..., isTest: false }` — the test asserts the SHAPE, not the default.
+    expect(RelayEnvelopeSchema.parse(envelope)).toEqual({ ...envelope, isTest: false });
+  });
+
+  it('[RELAY-50] marks an envelope from the dashboard "Send test webhook" as test', () => {
+    const envelope = {
+      requestId: '3f2504e0-4f89-41d3-9a0c-0305e82c3301',
+      routeId: '3f2504e0-4f89-41d3-9a0c-0305e82c3302',
+      teamId: '3f2504e0-4f89-41d3-9a0c-0305e82c3303',
+      destination: 'https://api.example.com/hook',
+      maxRetries: 7,
+      receivedAt: '2026-08-03T00:00:00.000Z',
+      headers: { 'content-type': 'application/json' },
+      body: '{"ok":true}',
+    };
+    const parsed = RelayEnvelopeSchema.parse({ ...envelope });
+    expect(parsed.isTest).toBe(false);
+    expect(RelayEnvelopeSchema.parse({ ...envelope, isTest: true }).isTest).toBe(true);
   });
 });

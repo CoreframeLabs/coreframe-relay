@@ -80,6 +80,17 @@ const unAuthenticatedRoutes = [
   // QStash's request signature, both before touching any data.
   '/api/relay/internal/route-lookup',
   '/api/relay/qstash',
+  // [RELAY-50] Local-only test delivery sink. Auth is NOT a signature — it is the
+  // RELAY_API_SECRET shared with the proxy's dev environment, because the value of
+  // the local loop is proving the pipeline end-to-end, and a signature-verified
+  // receiver cannot be told "the signature was made by the proxy you are testing".
+  '/api/relay/qstash-test',
+  // [RELAY-50] The catcher is a per-route webhook receiver, and its whole point is
+  // reachable from the browser for a user who has not yet wired a destination. The URL
+  // is the credential (same reasoning as the ingest token itself, RELAY-57). It must
+  // therefore not be session-gated — the dashboard session is not what authenticates
+  // a webhook receiver.
+  '/api/relay/catcher/*',
   '/auth/**',
   '/invitations/*',
   '/terms-condition',

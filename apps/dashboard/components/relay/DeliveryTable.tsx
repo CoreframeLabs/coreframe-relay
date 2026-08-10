@@ -260,7 +260,13 @@ export function DeliveryTable({
                       )}
                     >
                       <div role="cell">
-                        <StatusBadge state={row.status as BadgeState} />
+                        {/* TEST is a second badge, not a status overwrite: a row can
+                            be TEST+DELIVERED, and only seeing the colour on one arm
+                            would throw away whether the synthetic send arrived. */}
+                        <div className="flex items-center gap-1.5">
+                          <StatusBadge state={row.status as BadgeState} />
+                          {row.isTest && <StatusBadge state="TEST" />}
+                        </div>
                       </div>
 
                       <div role="cell" className="min-w-0">

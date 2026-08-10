@@ -55,6 +55,13 @@ export type DeliveryAttempt = {
   latencyMs: number | null;
   payloadSizeB: number | null;
   deliveredAt: Date | null;
+  /**
+   * [RELAY-50] Defaults to false so every call site that does not know about the flag
+   * still records a REAL delivery — the bias that makes a forged `isTest: true` view-
+   * only, never a billing dodge. The badge reads this field; the usage counter
+   * ([RELAY-12] / RELAY-52's north-star filter) reads this field; nothing else does.
+   */
+  isTest: boolean;
 };
 
 /**
@@ -88,6 +95,7 @@ export async function recordDeliveryAttempt(
     latencyMs: attempt.latencyMs,
     payloadSizeB: attempt.payloadSizeB,
     deliveredAt: attempt.deliveredAt,
+    isTest: attempt.isTest,
   };
 
   try {
@@ -110,6 +118,7 @@ export async function recordDeliveryAttempt(
         latencyMs: attempt.latencyMs,
         payloadSizeB: attempt.payloadSizeB,
         deliveredAt: attempt.deliveredAt,
+        isTest: attempt.isTest,
       },
     });
 
@@ -183,6 +192,7 @@ const feedSelect = {
   latencyMs: true,
   payloadSizeB: true,
   sourceIp: true,
+  isTest: true,
   createdAt: true,
   deliveredAt: true,
   route: { select: { id: true, name: true, slug: true } },
@@ -198,6 +208,7 @@ export type DeliveryFeedRow = {
   latencyMs: number | null;
   payloadSizeB: number | null;
   sourceIp: string | null;
+  isTest: boolean;
   createdAt: Date;
   deliveredAt: Date | null;
   route: { id: string; name: string; slug: string };

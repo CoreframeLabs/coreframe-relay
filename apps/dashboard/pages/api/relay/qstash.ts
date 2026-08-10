@@ -3,19 +3,7 @@ import type { Readable } from 'node:stream';
 import { Receiver } from '@upstash/qstash';
 import { RelayEnvelopeSchema } from '@coreframe-relay/types';
 
-import { forwardToDestination } from '@/lib/relay/forward';
-import {
-  decryptDestinationHeaders,
-  DestinationHeadersKeyError,
-  DestinationHeadersTamperError,
-} from '@/lib/relay/destinationAuth';
-import { recordMetric } from '@/lib/metrics';
-import {
-  assertRouteBelongsToTeam,
-  recordDeliveryAttempt,
-} from 'models/delivery';
-import { recordDlqItem } from 'models/dlq';
-import { fetchRouteForDelivery } from 'models/route';
+import { consumeEnvelope } from '@/lib/relay/consume';
 
 /**
  * POST /api/relay/qstash — the delivery consumer. [RELAY-5]
@@ -141,154 +129,12 @@ export default async function handler(
     return res.status(400).json({ error: 'bad_request' });
   }
 
-  const { requestId, routeId, teamId, destination, maxRetries, headers, body } =
-    envelope.data;
-
-  const retried = Number.parseInt(
+  // The delivery half is shared with the local-only `qstash-test` endpoint
+  // ([RELAY-50]) — one code path, one place a fix lands.
+  const retriedRaw = Number.parseInt(
     String(req.headers[RETRIED_HEADER] ?? '0'),
     10
   );
-  const retriesSoFar = Number.isFinite(retried) && retried >= 0 ? retried : 0;
-  const attemptCount = retriesSoFar + 1;
-  const isFinalAttempt = retriesSoFar >= maxRetries;
+  return consumeEnvelope(envelope.data, retriedRaw, res);
 
-  const payloadSizeB = Buffer.byteLength(body, 'utf8');
-
-  // Tenant check BEFORE the outbound request, not after.
-  //
-  // Found by running this, not by reading it: with the check left to happen inside the
-  // DeliveryLog write, an envelope pairing one team's id with another team's route still
-  // caused a real POST to the destination first, and then surfaced as a 500 — which
-  // QStash reads as "retry", so it would re-deliver a payload that can never be recorded,
-  // for the whole retry budget. 400 instead: the pair is wrong permanently, and no amount
-  // of retrying will make it right.
-  try {
-    await assertRouteBelongsToTeam(teamId, routeId);
-  } catch {
-    console.error('[relay] qstash: envelope route/team pair does not exist', {
-      requestId,
-    });
-    return res.status(400).json({ error: 'bad_request' });
-  }
-
-  // ── [RELAY-59] Decrypt the customer-configured destination auth headers. ─────────
-  //
-  // The route row, not the envelope, is the source. The envelope's `destination` was
-  // pinned at ingestion; the AUTH config lives on the route and may have been changed
-  // since. This read is scoped by teamId against the envelope's pair, so a route
-  // whose headers were edited mid-flight to belong elsewhere yields nothing.
-  //
-  // Failure mode: if decryption cannot be completed — key gone, tampered ciphertext —
-  // the responsible thing is to record a FAILED row and not POST a half-authenticated
-  // payload to a destination that may then trust it. This is loud on purpose; the
-  // alternative is silently forwarding without auth and the destination then handing
-  // the customer a log of unauthenticated POSTs misattributed to them.
-  let destinationHeaders: Record<string, string> = {};
-  {
-    const route = await fetchRouteForDelivery(teamId, routeId);
-    const stored = route?.destinationHeadersEncrypted ?? null;
-    if (stored) {
-      try {
-        destinationHeaders = decryptDestinationHeaders(stored);
-      } catch (error) {
-        // Purposeful difference: a tamper is recorded as FAILED, not retried — a
-        // tampered row will not magically decrypt on the next attempt, and 5xx-ing
-        // invites QStash to keep retrying a failure it cannot help with.
-        if (error instanceof DestinationHeadersTamperError) {
-          await recordDeliveryAttempt({
-            teamId,
-            routeId,
-            requestId,
-            status: 'FAILED',
-            attemptCount,
-            responseCode: null,
-            latencyMs: null,
-            payloadSizeB,
-            deliveredAt: null,
-          });
-          console.error('[relay] qstash: destination headers tampered or key changed', {
-            requestId,
-          });
-          // 200 here on purpose: this is OUR failure, not QStash's or the destination's,
-          // and a non-2xx would drive retries that achieve nothing.
-          return res.status(200).json({ status: 'failed', requestId });
-        }
-        if (error instanceof DestinationHeadersKeyError) {
-          // Misconfigured deploy. 500 is correct: another attempt after the env is
-          // fixed is the right behaviour.
-          throw error;
-        }
-        throw error;
-      }
-    }
-  }
-
-  const outcome = await forwardToDestination({
-    destination,
-    headers,
-    body,
-    requestId,
-    // Decrypted only now, only here, only for this request. Never stored, never logged.
-    destinationHeaders,
-  });
-
-  try {
-    // Status reflects where this delivery actually stands, so the feed and the DLQ page
-    // agree with each other: DELIVERED, RETRYING while attempts remain, DLQ once the
-    // budget is spent. FAILED is reserved for a terminal failure with no DLQ row.
-    const status = outcome.ok
-      ? 'DELIVERED'
-      : isFinalAttempt
-        ? 'DLQ'
-        : 'RETRYING';
-
-    await recordDeliveryAttempt({
-      teamId,
-      routeId,
-      requestId,
-      status,
-      attemptCount,
-      responseCode: outcome.responseCode,
-      latencyMs: outcome.latencyMs,
-      payloadSizeB,
-      deliveredAt: outcome.ok ? new Date() : null,
-    });
-
-    if (outcome.ok) {
-      recordMetric('delivery.delivered');
-      return res.status(200).json({ status: 'delivered', requestId });
-    }
-
-    if (isFinalAttempt) {
-      await recordDlqItem({
-        teamId,
-        routeId,
-        requestId,
-        failReason: outcome.failReason ?? 'delivery failed',
-        attemptCount,
-        body,
-      });
-
-      recordMetric('delivery.dlq');
-
-      // 200 on purpose: the retry budget is spent and the failure is now durably recorded
-      // on our side. Asking QStash to retry again would deliver a payload we have already
-      // declared dead.
-      return res.status(200).json({ status: 'dlq', requestId });
-    }
-
-    recordMetric('delivery.retrying');
-
-    // 502 asks QStash for the next retry. The customer's destination failed; we did not.
-    return res.status(502).json({ status: 'retrying', requestId });
-  } catch (error) {
-    // A failure to WRITE the outcome is our fault, not the destination's, and it must be
-    // retried — returning 200 here would lose the delivery record silently, which is the
-    // exact failure mode [RELAY-44] exists to catch.
-    console.error('[relay] qstash: failed to record delivery', {
-      requestId,
-      name: error instanceof Error ? error.name : 'unknown',
-    });
-    return res.status(500).json({ error: 'internal_error' });
-  }
 }

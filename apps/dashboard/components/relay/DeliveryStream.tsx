@@ -26,6 +26,11 @@ export type DeliveryRow = {
   latencyMs: number | null;
   payloadSizeB: number | null;
   sourceIp: string | null;
+  // [RELAY-50] True when the row was produced by the "Send test webhook" button, not
+  // by an external sender. The DeliveryTable renders it as a TEST badge, and the
+  // billing counter ([RELAY-12]) reads the same field — this is how the two stay in
+  // agreement without the UI re-deriving it from the URL.
+  isTest: boolean;
   createdAt: string;
   deliveredAt: string | null;
   route: { id: string; name: string; slug: string };

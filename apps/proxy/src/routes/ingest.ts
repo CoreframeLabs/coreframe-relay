@@ -51,6 +51,9 @@ const STRIPPED_HEADERS = new Set([
   'x-relay-key',
   'authorization',
   'cookie',
+  // [RELAY-50] The test-send marker is consumed by the pipeline itself; the
+  // customer destination must never see Relay's internal instrumentation headers.
+  'x-relay-event',
   // Hop-by-hop: meaningless or actively harmful on a different connection.
   'host',
   'connection',
@@ -245,6 +248,24 @@ export const ingest = new Hono<AppEnv>()
       return c.json({ error: 'route destination is not permitted', requestId }, 502);
     }
 
+    /**
+     * [RELAY-50] The "Send test webhook" button fires a structurally real webhook
+     * through this same endpoint. What marks it is a single header —
+     * `x-relay-event: test` — which is stripped from the forwardable headers (it is
+     * our instrumentation, not the sender's) and re-emitted as an envelope field the
+     * consumer persists onto the `DeliveryLog` row. The badge and the billing
+     * exclusion both read that field; nothing here behaves differently for a test
+     * webhook, because making the test path a shortcut is precisely what this ticket
+     * exists to disprove.
+     *
+     * Security-relevant: the flag is SELF-ATTESTED. An external caller can set it to
+     * dodge usage counters. The guard for that lives in RELAY-52's north-star filter,
+     * and the send is server-side authenticated — this header never reaches the
+     * browser in any form a user can smuggle a forged `isTest` through.
+     */
+    const relayEvent = c.req.header('x-relay-event')?.trim().toLowerCase();
+    const isTest = relayEvent === 'test';
+
     const read = await readBodyWithLimit(c.req.raw, MAX_BODY_BYTES);
     if (!read.ok) {
       log('proxy.ingest.body_too_large', { requestId, routeId: route.routeId, limit: MAX_BODY_BYTES });
@@ -262,6 +283,7 @@ export const ingest = new Hono<AppEnv>()
       // Raw body exactly as received. Re-encoding it would invalidate every HMAC
       // signature the sender computed over these bytes.
       body: read.body,
+      isTest,
     };
 
     // Validated against the shared schema before it leaves: the consumer parses with the

@@ -34,6 +34,18 @@ export type PublishResult =
  */
 export const QSTASH_CALLBACK_PATH = '/api/relay/qstash';
 
+/**
+ * [RELAY-50] Local-only queue replacement for `wrangler dev`. Upstash's callback
+ * requires a public URL, and a `localhost` destination is rejected with
+ * "endpoint resolves to a loopback address" — the leg of the pipeline the public
+ * internet can never prove locally. When `RELAY_LOCAL_QUEUE_URL` is bound (dev only),
+ * the envelope is POSTed straight to the dashboard's consumer over plain fetch, with
+ * the request-id header forwarded, and the function returns as if QStash had accepted
+ * it. The consumer treats every request it receives as verified regardless of how it
+ * arrived, which is precisely why this binding is never present in a deployed env.
+ */
+export const RELAY_LOCAL_QUEUE_PATH = '/api/relay/qstash-test';
+
 /** Ceiling on how long a publish may take before the ack path gives up. */
 const PUBLISH_TIMEOUT_MS = 5_000;
 
@@ -47,22 +59,42 @@ export async function publishToQStash(
 
   if (!base || !token || !dashboard) return { ok: false, code: 'not_configured' };
 
-  const callback = new URL(QSTASH_CALLBACK_PATH, dashboard).toString();
-  const publishUrl = `${base.replace(/\/+$/, '')}/v2/publish/${callback}`;
+  // [RELAY-50] Local-only queue: cut out Upstash, deliver straight to the dashboard.
+  // The header and body shape below matches what the consumer would get from QStash
+  // (relay-request-id arrives via `Upstash-Forward-…`, so here it is set directly),
+  // which keeps the handler agnostic about which of its callers is real.
+  const localQueue = env.RELAY_LOCAL_QUEUE_URL;
+  const callback = localQueue
+    ? new URL(RELAY_LOCAL_QUEUE_PATH, dashboard).toString()
+    : new URL(QSTASH_CALLBACK_PATH, dashboard).toString();
+  const publishUrl = localQueue
+    ? callback
+    : `${base.replace(/\/+$/, '')}/v2/publish/${callback}`;
 
   let res: Response;
   try {
     res = await fetch(publishUrl, {
       method: 'POST',
       headers: {
-        authorization: `Bearer ${token}`,
+        // The Bearer token is only needed for the real QStash path — the local loop
+        // trusts the shared local dev environment and authentication on the receiving
+        // endpoint is the responsibility of that endpoint's own signature check.
+        ...(localQueue ? {} : { authorization: `Bearer ${token}` }),
         'content-type': 'application/json',
-        // The route's own retry budget, not a global default. Bounded 1..10 by the
-        // contract schema; QStash clamps to the account plan's own ceiling above that.
-        'Upstash-Retries': String(envelope.maxRetries),
+        ...(localQueue
+          ? {}
+          : {
+              // The route's own retry budget, not a global default. Bounded 1..10 by
+              // the contract schema; QStash clamps to the account plan's ceiling above
+              // that. The local loop skips retries entirely: the point of the button
+              // is an immediate answer, not a retry budget spent against a local server.
+              'Upstash-Retries': String(envelope.maxRetries),
+            }),
         // Reaches the consumer as `relay-request-id`, which is how one webhook is
         // correlated across proxy → QStash → consumer → DeliveryLog row.
-        [`Upstash-Forward-${RELAY_REQUEST_ID_HEADER}`]: envelope.requestId,
+        ...(localQueue
+          ? { [RELAY_REQUEST_ID_HEADER]: envelope.requestId }
+          : { [`Upstash-Forward-${RELAY_REQUEST_ID_HEADER}`]: envelope.requestId }),
       },
       body: JSON.stringify(envelope),
       signal: AbortSignal.timeout(PUBLISH_TIMEOUT_MS),
@@ -79,10 +111,14 @@ export async function publishToQStash(
   // `{ messageId: "msg_..." }`. Hence the `res.ok` range check above rather than a
   // `=== 200`. The id is useful in logs, but the ack does not depend on parsing it — the
   // message is durable the moment QStash returns 2xx.
+  //
+  // On the local loop (`RELAY_LOCAL_QUEUE_URL` bound) the consumer answers 200 with
+  // its own body — `messageId` here is a sentinel, not a QStash id, and the distinction
+  // only matters for log correlation, which this deliberately does not claim to be.
   try {
     const body = (await res.json()) as { messageId?: string };
-    return { ok: true, messageId: body.messageId ?? null };
+    return { ok: true, messageId: localQueue ? (body.messageId ?? 'local') : body.messageId ?? null };
   } catch {
-    return { ok: true, messageId: null };
+    return { ok: true, messageId: localQueue ? 'local' : null };
   }
 }

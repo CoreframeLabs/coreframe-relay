@@ -22,7 +22,12 @@ export type BadgeState =
   | 'QUEUED'
   | 'PAUSED'
   | 'ACTIVE'
-  | 'FAILING';
+  | 'FAILING'
+  // [RELAY-50] Marks a DeliveryLog row written by the "Send test webhook" button.
+  // Distinct from DELIVERED — a real delivery SUCCESS carrying this badge would
+  // lie about which bytes actually reached a customer endpoint, and the billing
+  // exclusion hooks it, so the same flag states it on both sides.
+  | 'TEST';
 
 const STYLES: Record<BadgeState, { wrap: string; dot: string; pulse: boolean; label: string }> = {
   SUCCESS:   { wrap: 'bg-green-500/10 text-green-400', dot: 'bg-green-500', pulse: false, label: 'SUCCESS' },
@@ -34,6 +39,11 @@ const STYLES: Record<BadgeState, { wrap: string; dot: string; pulse: boolean; la
   FAILED:    { wrap: 'bg-red-500/10 text-red-400',     dot: 'bg-red-500',   pulse: false, label: 'FAILED' },
   DLQ:       { wrap: 'bg-red-900/40 text-red-300',     dot: 'bg-red-500',   pulse: false, label: 'DLQ' },
   PAUSED:    { wrap: 'bg-zinc-700/40 text-zinc-400',   dot: 'bg-zinc-500',  pulse: false, label: 'PAUSED' },
+  // [RELAY-50] TEST is its own colour precisely so it cannot be confused with a real
+  // DELIVERED row. The `isTest` flag travels on the FeedRow type, not on the status,
+  // because a TEST row's status is still QUEUED/DELIVERED/… — and collapsing them
+  // would hide whether the synthetic send actually reached its destination.
+  TEST:      { wrap: 'bg-violet-500/15 text-violet-300',dot: 'bg-violet-500', pulse: false, label: 'TEST' },
 };
 
 export function StatusBadge({ state, className }: { state: BadgeState; className?: string }) {

@@ -18,6 +18,15 @@ export type Bindings = {
   RELAY_DASHBOARD_URL?: string;
   UPSTASH_QSTASH_URL?: string;
   UPSTASH_QSTASH_TOKEN?: string;
+  /**
+   * [RELAY-50] When set, `POST /in/…` accepts requests on a wholly local loop:
+   * instead of publishing to QStash, the envelope is POSTed straight to
+   * `@coreframe-relay/dashboard`'s consumer (`/api/relay/qstash-test`), which
+   * bypasses signature verification (localhost-only) so the pipeline can be proven
+   * end to end without a public callback or live QStash. Set on `wrangler dev`
+   * only — deployed envs never have this binding.
+   */
+  RELAY_LOCAL_QUEUE_URL?: string;
   /** Idempotency keys and rate-limit counters ([RELAY-4]). */
   RELAY_KV?: KVNamespace;
 };

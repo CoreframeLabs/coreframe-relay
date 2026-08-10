@@ -22,6 +22,7 @@ import {
 import { Button } from '@/components/ui/button';
 import { StatusBadge } from './StatusBadge';
 import { CopyableUrl } from './CopyableUrl';
+import { SendTestButton } from './SendTestButton';
 import { cn } from '@/lib/utils';
 
 /** A Route as the API returns it — the model plus its derived public URL. */
@@ -253,6 +254,33 @@ export function RoutesTable({
             {fmtDate(info.getValue())}
           </span>
         ),
+      }),
+      // [RELAY-50] One action column, one button. The button's own popover carries
+      // "Send to the built-in catcher" as a second step for an onboarding user who
+      // has not wired a destination yet; the column header is the action, not the
+      // route, so it is not sorted or filtered.
+      columnHelper.display({
+        id: 'actions',
+        header: '',
+        enableSorting: false,
+        cell: (info) => {
+          const route = info.row.original;
+          // A PAUSED route is the one an operator is debugging — the button must
+          // remain visible there. ARCHIVED rows do not reach this table today, so
+          // the guard is written as an allow-list so a new status fails closed.
+          if (route.status !== 'ACTIVE' && route.status !== 'FAILING') {
+            return null;
+          }
+          return (
+            <div className="relative flex justify-end">
+              <SendTestButton
+                routeId={route.id}
+                teamSlug={teamSlug}
+                routeName={route.name}
+              />
+            </div>
+          );
+        },
       }),
     ],
     // Rebuilt whenever per-row interaction state changes: cell renderers read
