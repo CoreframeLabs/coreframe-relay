@@ -23,6 +23,11 @@ const createRouteSchema = z.object({
   destination: DestinationUrlSchema,
   // Bounded by QStash's retry budget, not an arbitrary number.
   maxRetries: z.number().int().min(1).max(10).default(7),
+  // [RELAY-59] Optional destination auth headers, set atomically at create time. The
+  // VALUES are validated and encrypted inside `createRoute`; this schema's role is a
+  // shape check only. A customer editing them later hits PUT …/destination-headers,
+  // which replaces the whole map.
+  destinationHeaders: z.record(z.string(), z.string()).optional(),
 });
 
 export default async function handler(req: NextApiRequest, res: NextApiResponse) {
@@ -59,7 +64,15 @@ const handleGET = async (req: NextApiRequest, res: NextApiResponse) => {
 
   res.status(200).json({
     data: routes.map((route) => ({
-      ...route,
+      id: route.id,
+      teamId: route.teamId,
+      name: route.name,
+      slug: route.slug,
+      destination: route.destination,
+      maxRetries: route.maxRetries,
+      status: route.status,
+      createdAt: route.createdAt,
+      updatedAt: route.updatedAt,
       relayUrl: relayUrlFor(user.team.slug, route.slug, route.ingestToken),
     })),
   });
@@ -71,13 +84,14 @@ const handlePOST = async (req: NextApiRequest, res: NextApiResponse) => {
   // is an update-level permission, not a read.
   throwIfNotAllowed(user, 'team', 'update');
 
-  const { name, destination, maxRetries } = validateWithSchema(createRouteSchema, req.body);
+  const { name, destination, maxRetries, destinationHeaders } = validateWithSchema(createRouteSchema, req.body);
 
   const route = await createRoute({
     teamId: user.team.id,
     name,
     destination,
     maxRetries,
+    destinationHeaders,
   });
 
   await recordAuditEvent({
@@ -92,7 +106,27 @@ const handlePOST = async (req: NextApiRequest, res: NextApiResponse) => {
 
   recordMetric('route.created');
 
+  // Never spread the full `route` row onto the wire: it carries
+  // `destinationHeadersEncrypted`, and an `{ ...route }` would start shipping the
+  // encrypted customer credentials to a browser the moment a column was added.
+  // The response is built by hand, field by field, and stays that way.
   res.status(201).json({
-    data: { ...route, relayUrl: relayUrlFor(user.team.slug, route.slug, route.ingestToken) },
+    data: {
+      id: route.id,
+      teamId: route.teamId,
+      name: route.name,
+      slug: route.slug,
+      destination: route.destination,
+      maxRetries: route.maxRetries,
+      status: route.status,
+      createdAt: route.createdAt,
+      updatedAt: route.updatedAt,
+      // [RELAY-57] the ingest token is safe to surface here — the wizard needs the URL.
+      relayUrl: relayUrlFor(user.team.slug, route.slug, route.ingestToken),
+      // [RELAY-59] names only, never values, never ciphertext.
+      destinationHeaderNames: destinationHeaders
+        ? Object.keys(destinationHeaders).sort()
+        : [],
+    },
   });
 };

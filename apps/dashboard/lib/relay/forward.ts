@@ -1,6 +1,7 @@
 // ⚠ The SSRF import below is the ONE line [RELAY-33] swaps for the shared package.
 // Read `lib/relay/ssrfGap.ts` before assuming this path is SSRF-protected — it is not.
 import { validateDestination } from '@/lib/relay/ssrfGap';
+import { DESTINATION_HEADER_ALLOWED_NAMES } from '@/lib/relay/destinationAuth';
 
 /**
  * Forwarding a buffered webhook to the customer's destination. [RELAY-5]
@@ -74,6 +75,55 @@ const BLOCKED_HEADER_PREFIXES = [
 /** Identifies Relay to the destination. A receiver should be able to tell who called it. */
 const USER_AGENT = 'Coreframe-Relay/1.0 (+https://www.coreframe-labs.dev)';
 
+/**
+ * How much of `destinationHeaders` is allowed to land on the wire. RELAY-59's whole
+ * point is EXPLICIT and narrow: these headers are customer-configured credentials,
+ * they arrived encrypted, and by the time this function runs they have already been
+ * decrypted and named.
+ *
+ * Two separable rule sets, in two directions:
+ *
+ *   - `DESTINATION_HEADER_ALLOWED_NAMES` is the WRITE-TIME allowlist: which header
+ *     names a customer is permitted to set at all. An attempt to set anything else
+ *      is rejected BEFORE the column is written.
+ *
+ *   - `BLOCKED_HEADERS` / `BLOCKED_HEADER_PREFIXES` are the FORWARD-TIME denylists:
+ *     they are what stops an INBOUND `Authorization` (or `Cookie`, `X-Relay-Key`, …)
+ *     from being replayed out the far side. They are not meant to answer "may a
+ *     customer configure this one" — only "must we NOT replay what arrived".
+ *
+ * The two sets CAN overlap legitimately. `x-api-key`, `authorization` are names a
+ * customer may SET, and names we must not REPLAY from a sender. The rule this
+ * function encodes captures the ONLY interpretation that does not either
+ * (a) quietly allow inbound auth headers through, or
+ * (b) silently no-op the whole feature:
+ *
+ *   - Names on the WRITE ALLOWLIST pass through.
+ *   - Names on the inbound DENY lists ALSO pass through here — because their reach
+ *     is the inbound set, and this function only ever sees the decrypted customer-set
+ *     set. `filterForwardHeaders(params.headers)` is what applies them.
+ *
+ * The result: a destination can be configured with `Authorization: Bearer x` and
+ * that SINGLE controlled value crosses; an inbound `Authorization: Bearer evil` from
+ * a sender cannot arrive here, because that header is dropped from `params.headers`
+ * before this function is called.
+ */
+export function destinationHeadersToSend(
+  configured: Record<string, string>
+): Record<string, string> {
+  const out: Record<string, string> = {};
+  for (const [rawName, value] of Object.entries(configured)) {
+    const name = rawName.toLowerCase().trim();
+    // Only allow-listed names reach the wire, no matter what was stored.
+    if (!DESTINATION_HEADER_ALLOWED_NAMES.includes(name)) continue;
+    // The values are customer-supplied — a CRLF inside one is an injection attempt
+    // against the destination itself.
+    if (/[\r\n]/.test(value)) continue;
+    out[name] = value;
+  }
+  return out;
+}
+
 export type ForwardOutcome = {
   /** True only for a 2xx. A 3xx is NOT success: nothing followed the redirect. */
   ok: boolean;
@@ -125,6 +175,14 @@ export async function forwardToDestination(params: {
   body: string;
   requestId: string;
   timeoutMs?: number;
+  /**
+   * [RELAY-59] Decrypted customer-configured destination auth headers. These are NOT
+   * passed through `filterForwardHeaders`' wide-open path — they go through
+   * `destinationHeadersToSend`, the explicit narrow filter. An inbound `Authorization`
+   * the sender set CANNOT arrive here; what can is a value the customer stored against
+   * their route.
+   */
+  destinationHeaders?: Record<string, string>;
 }): Promise<ForwardOutcome> {
   const startedAt = Date.now();
 
@@ -155,6 +213,12 @@ export async function forwardToDestination(params: {
       method: 'POST',
       headers: {
         ...filterForwardHeaders(params.headers),
+        // RELAY-59: customer-auth headers go on AFTER the inbound set, and after a
+        // narrow allowlist — a value the customer stored can therefore SET
+        // `authorization` on the outbound request, and an inbound `authorization`
+        // header cannot survive into this point because `filterForwardHeaders` dropped
+        // it and nothing re-adds it from `params.headers`.
+        ...destinationHeadersToSend(params.destinationHeaders ?? {}),
         'user-agent': USER_AGENT,
         // Lower-case on purpose — see RELAY_REQUEST_ID_HEADER's note in the contract.
         'relay-request-id': params.requestId,

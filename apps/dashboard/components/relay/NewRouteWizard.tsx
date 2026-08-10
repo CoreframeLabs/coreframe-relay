@@ -11,7 +11,25 @@ import {
   DialogTitle,
 } from '@/components/ui/dialog';
 import { CopyableUrl } from './CopyableUrl';
+import { DestinationHeadersEditor, type HeaderDraft } from './DestinationHeadersEditor';
 import type { RouteRow } from './RoutesTable';
+
+/**
+ * Names the route-creation API accepts for customer destination auth headers. [RELAY-59]
+ * This MIRRORS the server's allowlist — a duplicate for the wizard to offer. The
+ * server is the only enforcer; if the two drift the server rejects and this string
+ * is where an operator looks.
+ */
+const ALLOWED_HEADER_NAMES: ReadonlyArray<string> = [
+  'authorization',
+  'x-api-key',
+  'x-auth-token',
+  'x-access-token',
+  'x-signature',
+  'x-hmac-signature',
+  'x-webhook-secret',
+  'x-github-hook-secret',
+];
 
 /**
  * "New Route" 3-step wizard — [RELAY-6].
@@ -64,6 +82,13 @@ export function NewRouteWizard({
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [created, setCreated] = useState<RouteRow | null>(null);
+  // [RELAY-59] Destination auth headers. Values are collected here and SENT with the
+  // create call, never stored in React state past the submit. Reveal flags index the
+  // visible rows on this render; clearing the form clears them.
+  const [headers, setHeaders] = useState<HeaderDraft[]>([]);
+  const [revealedHeaderRows, setRevealedHeaderRows] = useState<ReadonlySet<number>>(
+    new Set()
+  );
 
   const slug = previewSlug(name);
   const canAdvance = step === 1 ? slug.length > 0 : isHttpUrl(destination);
@@ -76,6 +101,8 @@ export function NewRouteWizard({
     setError(null);
     setCreated(null);
     setSubmitting(false);
+    setHeaders([]);
+    setRevealedHeaderRows(new Set());
   };
 
   const close = (next: boolean) => {
@@ -89,10 +116,27 @@ export function NewRouteWizard({
     setSubmitting(true);
     setError(null);
     try {
+      // [RELAY-59] headers rides the SAME create call so the wizard cannot forget to
+      // encrypt them, and an empty array on the wire means "no auth" not "leave the
+      // previous values alone". The server validates and encrypts before the row is
+      // touched.
+      const payload: Record<string, unknown> = {
+        name: name.trim(),
+        destination: destination.trim(),
+        maxRetries,
+      };
+      if (headers.length > 0) {
+        payload.destinationHeaders = Object.fromEntries(
+          headers
+            .filter((h) => h.name.trim() && h.value.trim())
+            .map((h) => [h.name.trim().toLowerCase(), h.value])
+        );
+      }
+
       const res = await fetch(`/api/teams/${teamSlug}/relay/routes`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ name: name.trim(), destination: destination.trim(), maxRetries }),
+        body: JSON.stringify(payload),
       });
       const json = await res.json();
       if (!res.ok) {
@@ -175,6 +219,21 @@ export function NewRouteWizard({
                 <p className="text-xs text-red-400">Must be an http(s) URL.</p>
               )}
             </div>
+
+            <DestinationHeadersEditor
+              value={headers}
+              onChange={setHeaders}
+              allowedNames={ALLOWED_HEADER_NAMES}
+              revealedRows={revealedHeaderRows}
+              onToggleReveal={(index) =>
+                setRevealedHeaderRows((current) => {
+                  const next = new Set(current);
+                  if (next.has(index)) next.delete(index);
+                  else next.add(index);
+                  return next;
+                })
+              }
+            />
 
             <div className="space-y-2">
               <Label htmlFor="route-retries">Max retries</Label>
