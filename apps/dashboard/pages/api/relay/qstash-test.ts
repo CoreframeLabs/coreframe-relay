@@ -70,7 +70,14 @@ export default async function handler(
   }
 
   // Retry counter arrives as the header the proxy sets on its local-loop fetch.
-  // QStash supplies `upstash-retried`; here there is no retry budget — a local test
-  // is ONE attempt, by design, so the counter is clamped to zero.
-  return consumeEnvelope(envelope.data, 0, res);
+  // QStash supplies `upstash-retried`; when the caller (the smoke test, or a test
+  // driving the DLQ path) explicitly sets `x-relay-test-retried`, that value is
+  // passed through so the DLQ's final-attempt branch is exercisable locally. The
+  // proxy's own delivery never sets this header, so a production-shaped input
+  // without it arrives as first attempt = 0, the same as before.
+  const retriedRaw = Number.parseInt(
+    String(req.headers['x-relay-test-retried'] ?? '0'),
+    10
+  );
+  return consumeEnvelope(envelope.data, retriedRaw, res);
 }

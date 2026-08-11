@@ -3,12 +3,18 @@ import type { RelayEnvelope } from '@coreframe-relay/types';
 
 import { withTeamScope } from '@/lib/db/scope';
 import { forwardToDestination } from '@/lib/relay/forward';
+import {
+  decryptDestinationHeaders,
+  DestinationHeadersKeyError,
+  DestinationHeadersTamperError,
+} from '@/lib/relay/destinationAuth';
 import { recordMetric } from '@/lib/metrics';
 import {
   assertRouteBelongsToTeam,
   recordDeliveryAttempt,
 } from 'models/delivery';
 import { recordDlqItem } from 'models/dlq';
+import { fetchRouteForDelivery } from 'models/route';
 
 /**
  * The pipeline's delivery half, extracted from `pages/api/relay/qstash.ts` so the same
@@ -66,11 +72,69 @@ export async function consumeEnvelope(
   // done on the claim and the claim is the scope, which is exactly what the
   // assert exists to stop.
   return withTeamScope(teamId, async () => {
+    // ── [RELAY-59] Decrypt the customer-configured destination auth headers. ──────
+    //
+    // The route row, not the envelope, is the source. The envelope's `destination`
+    // was pinned at ingestion; the AUTH config lives on the route and may have been
+    // changed since. This read is already inside `withTeamScope`, so a route whose
+    // headers were edited mid-flight to belong elsewhere yields nothing.
+    //
+    // Failure mode: if decryption cannot be completed — key gone, tampered ciphertext
+    // — the responsible thing is to record a FAILED row and NOT POST a half-authenticated
+    // payload a destination may then trust. Loud on purpose; the alternative is
+    // silently forwarding without auth and the destination handing the customer a log
+    // of unauthenticated POSTs misattributed to them.
+    let destinationHeaders: Record<string, string> = {};
+    {
+      const route = await fetchRouteForDelivery(teamId, routeId);
+      const stored = route?.destinationHeadersEncrypted ?? null;
+      if (stored) {
+        try {
+          destinationHeaders = decryptDestinationHeaders(stored);
+        } catch (error) {
+          // A tamper is recorded FAILED, not retried — a tampered row will not
+          // magically decrypt on the next attempt, and 5xx invites QStash to keep
+          // retrying a failure it cannot help with.
+          if (error instanceof DestinationHeadersTamperError) {
+            await recordDeliveryAttempt({
+              teamId,
+              routeId,
+              requestId,
+              status: 'FAILED',
+              attemptCount,
+              responseCode: null,
+              latencyMs: null,
+              payloadSizeB,
+              deliveredAt: null,
+              isTest,
+            });
+            console.error('[relay] qstash: destination headers tampered or key changed', {
+              requestId,
+            });
+            // 200 on purpose: this is OUR failure, not QStash's or the destination's,
+            // and a non-2xx would drive retries that achieve nothing.
+            return res.status(200).json({ status: 'failed', requestId });
+          }
+          if (error instanceof DestinationHeadersKeyError) {
+            // Misconfigured deploy. 500 is correct: another attempt once the env is
+            // fixed is the right behaviour.
+            throw error;
+          }
+          throw error;
+        }
+      }
+    }
+
     const outcome = await forwardToDestination({
       destination,
       headers,
       body,
       requestId,
+      // Propagated so the RELAY-66 smoke waiver in forward.ts fires ONLY for
+      // test-marked traffic; real webhooks keep the full SSRF rejection path.
+      isTest,
+      // Decrypted only now, only here, only for this request. Never stored, never logged.
+      destinationHeaders,
     });
 
     try {

@@ -236,8 +236,44 @@ export const ingest = new Hono<AppEnv>()
      *
      * The reason string is logged, never returned: it names the host, and the host is the
      * customer's private infrastructure.
+     *
+     * ONE waiver exists, and it is narrower than it looks: [RELAY-66]'s launch smoke
+     * test must deliver into `/api/relay/smoke-destination` on the local dashboard,
+     * which the literal-address validator above correctly rejects as loopback. The
+     * waiver fires only when ALL of these hold:
+     *   - `RELAY_LOCAL_QUEUE_URL` is configured, i.e. the local queue stand-in is the
+     *     publisher — this branch cannot exist on a deployed Worker, where that binding
+     *     is never set;
+     *   - the request is `x-relay-event: test`-marked — a real webhook can NEVER take
+     *     this path;
+     *   - the destination's host is exactly loopback AND its port is exactly the port of
+     *     `RELAY_DASHBOARD_URL`'s own origin — the smoke destination is the same app the
+     *     proxy already trusts for route lookup and consumer callbacks, not arbitrary
+     *     loopback.
+     * The envelope still records isTest=true, so the row the smoke asserts on is marked
+     * as what it is rather than impersonating production truth.
      */
-    const destination = validateDestination(route.destination);
+    const isTestSend = c.req.header('x-relay-event') === 'test';
+    let destination = validateDestination(route.destination);
+    if (!destination.ok && isTestSend && c.env.RELAY_LOCAL_QUEUE_URL && c.env.RELAY_DASHBOARD_URL) {
+      try {
+        const destUrl = new URL(route.destination);
+        const dashUrl = new URL(c.env.RELAY_DASHBOARD_URL);
+        const loopback =
+          destUrl.hostname === 'localhost' ||
+          destUrl.hostname === '127.0.0.1' ||
+          destUrl.hostname === '::1' ||
+          destUrl.hostname === '[::1]';
+        const dashPort = dashUrl.port || (dashUrl.protocol === 'https:' ? '443' : '80');
+        const destPort = destUrl.port || (destUrl.protocol === 'https:' ? '443' : '80');
+        if (loopback && destUrl.protocol === dashUrl.protocol && destPort === dashPort) {
+          destination = { ok: true, url: destUrl };
+        }
+      } catch {
+        // Fall through with the original rejection — the waiver never widens a failure
+        // into an acceptance by accident; a URL that cannot even parse stays rejected.
+      }
+    }
     if (!destination.ok) {
       log('proxy.ingest.destination_rejected', {
         requestId,

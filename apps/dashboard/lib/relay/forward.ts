@@ -183,10 +183,43 @@ export async function forwardToDestination(params: {
    * their route.
    */
   destinationHeaders?: Record<string, string>;
+  /**
+   * [RELAY-66] True only when the envelope was test-marked (`x-relay-event: test` at
+   * ingest, or RELAY-50's test-send). Enables the narrow loopback waiver documented
+   * below; a forged marker cannot reach here as true because consumeEnvelope defaults
+   * an unparsed envelope's `isTest` to false — REAL, never TEST.
+   */
+  isTest?: boolean;
 }): Promise<ForwardOutcome> {
   const startedAt = Date.now();
 
-  const check = validateDestination(params.destination);
+  /**
+   * Forward-time SSRF re-check — the destination is editable between ingest and send.
+   * ONE waiver, mirroring the one in apps/proxy/src/routes/ingest.ts and narrower here:
+   * [RELAY-66]'s smoke test delivers into /api/relay/smoke-destination on the local
+   * dashboard, which the literal-address validator correctly rejects as loopback. The
+   * waiver fires only when (a) the envelope is test-marked (a real webhook can never
+   * take this path — `isTest` defaults to REAL on an unparsed envelope) and (b) the
+   * destination's host is loopback with port exactly equal to the default Next.js dev
+   * port (4002) — i.e. the smoke destination, not arbitrary loopback. Everything else
+   * stays rejected, now and in production.
+   */
+  let check = validateDestination(params.destination);
+  if (!check.ok && params.isTest) {
+    try {
+      const destUrl = new URL(params.destination);
+      const loopback =
+        destUrl.hostname === 'localhost' ||
+        destUrl.hostname === '127.0.0.1' ||
+        destUrl.hostname === '::1' ||
+        destUrl.hostname === '[::1]';
+      if (loopback && (destUrl.port || '80') === '4002') {
+        check = { ok: true, url: destUrl };
+      }
+    } catch {
+      // Fall through with the original rejection — the waiver never widens a failure.
+    }
+  }
   if (!check.ok) {
     return {
       ok: false,

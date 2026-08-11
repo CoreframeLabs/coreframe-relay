@@ -85,6 +85,11 @@ const unAuthenticatedRoutes = [
   // the local loop is proving the pipeline end-to-end, and a signature-verified
   // receiver cannot be told "the signature was made by the proxy you are testing".
   '/api/relay/qstash-test',
+  // [RELAY-66] The smoke-test destination answers to the pipeline, not to a browser.
+  // Its Bearer guard against RELAY_API_SECRET is the authentication; without an entry
+  // here the middleware would redirect the consumer's outbound POST to /auth/login and
+  // the smoke leg could never drive a failure or a retry through the real pipeline.
+  '/api/relay/smoke-destination',
   // [RELAY-50] The catcher is a per-route webhook receiver, and its whole point is
   // reachable from the browser for a user who has not yet wired a destination. The URL
   // is the credential (same reasoning as the ingest token itself, RELAY-57). It must

@@ -243,6 +243,18 @@ jest.mock('../../models/dlq', () => ({
   __esModule: true,
   recordDlqItem: jest.fn(),
 }));
+// RELAY-59's consume.ts apply introduced these two reads; mock them to the
+// no-headers path so the RELAY-50 assertions keep testing what they test.
+jest.mock('../../models/route', () => ({
+  __esModule: true,
+  fetchRouteForDelivery: jest.fn(),
+}));
+jest.mock('../../lib/relay/destinationAuth', () => ({
+  __esModule: true,
+  decryptDestinationHeaders: jest.fn(),
+  DestinationHeadersKeyError: class DestinationHeadersKeyError extends Error {},
+  DestinationHeadersTamperError: class DestinationHeadersTamperError extends Error {},
+}));
 jest.mock('../../lib/db/scope', () => ({
   __esModule: true,
   withTeamScope: (_t: string, fn: () => Promise<unknown>) => fn(),
@@ -284,6 +296,11 @@ describe('consumeEnvelope [RELAY-50]', () => {
     });
     mockedAssert.mockResolvedValue(undefined);
     mockedRecord.mockResolvedValue({ log: {}, duplicate: false });
+    // Default: no stored destination headers → empty map, no decryption.
+    const { fetchRouteForDelivery } = require('../../models/route');
+    (fetchRouteForDelivery as jest.Mock).mockResolvedValue({
+      destinationHeadersEncrypted: null,
+    });
   });
 
   it('writes isTest=true onto the DeliveryLog row and skips the metric', async () => {
