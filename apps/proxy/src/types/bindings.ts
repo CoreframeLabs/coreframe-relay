@@ -29,6 +29,13 @@ export type Bindings = {
   RELAY_LOCAL_QUEUE_URL?: string;
   /** Idempotency keys and rate-limit counters ([RELAY-4]). */
   RELAY_KV?: KVNamespace;
+  /**
+   * [RELAY-67] Dashboard health endpoint the daily Cron Trigger pings to keep the
+   * hosted Supabase project busy enough that Supabase Free's 7-day no-activity pause
+   * never fires. Must be a full URL (e.g. `https://relay.coreframe-labs.dev/api/health`).
+   * Absent in local dev, where the keep-warm is pointless.
+   */
+  RELAY_DASHBOARD_HEALTH_URL?: string;
 };
 
 /** Values middleware attaches to the request context. */

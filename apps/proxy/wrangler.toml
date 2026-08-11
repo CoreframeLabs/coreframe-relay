@@ -29,3 +29,12 @@ vars = { ENVIRONMENT = "staging" }
 # [[kv_namespaces]]
 # binding = "RELAY_KV"
 # id = "<issued by: wrangler kv namespace create RELAY_KV>"
+
+# [RELAY-67] Daily keep-warm ping so Supabase Free's 7-day no-activity pause never
+# fires. Hits the DASHBOARD's /api/health (which performs one real DB read), observed
+# via `wrangler tail`. Runs in deployed envs only; local dev has no need of it.
+[env.production.triggers]
+crons = ["17 4 * * *"]
+
+[env.staging.triggers]
+crons = ["17 4 * * *"]
