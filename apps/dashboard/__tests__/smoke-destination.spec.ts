@@ -106,3 +106,77 @@ describe('/api/relay/smoke-destination', () => {
     expect((res as never as { _status: number })._status).toBe(405);
   });
 });
+
+/**
+ * [RELAY-74] The guard `4fcc0bc` promised in a comment and did not implement.
+ *
+ * `4fcc0bc` was right to delete the Bearer guard — the DLQ retry path replays envelopes
+ * with empty headers, so that credential was unreachable dead code — but it left the
+ * endpoint with NO control at all while its comment claimed it "must not ship on a
+ * deployed dashboard". These cases are that claim made executable.
+ */
+describe('/api/relay/smoke-destination — local-only guard [RELAY-74]', () => {
+  const originalEnv = process.env;
+
+  beforeEach(() => {
+    process.env = { ...originalEnv };
+    for (const marker of ['VERCEL', 'VERCEL_ENV', 'VERCEL_URL', 'RENDER']) {
+      delete process.env[marker];
+    }
+  });
+
+  afterAll(() => {
+    process.env = originalEnv;
+  });
+
+  it('answers 404 on a production build reached on a remote host', async () => {
+    process.env.NODE_ENV = 'production';
+    const res = makeResponse();
+    await handler(
+      makeRequest('POST', { host: 'relay.coreframe-labs.dev' }, { mode: '200' }),
+      res
+    );
+    // 404, not 401: no credential exists that would make this endpoint legitimate
+    // on a deployed dashboard, so "unauthorized" would invite a retry that can never work.
+    expect((res as never as { _status: number })._status).toBe(404);
+    expect((res as never as { _body: unknown })._body).toEqual({
+      error: 'not_found',
+    });
+  });
+
+  it('still answers on a production build reached over loopback (the local smoke)', async () => {
+    process.env.NODE_ENV = 'production';
+    const res = makeResponse();
+    await handler(
+      makeRequest('POST', { host: '127.0.0.1:4002' }, { mode: '200' }),
+      res
+    );
+    expect((res as never as { _status: number })._status).toBe(200);
+  });
+
+  it('answers 404 when a deploy-platform marker is set, whatever NODE_ENV says', async () => {
+    // The arm that does not depend on a variable being UNSET. `RELAY_LOCAL_QUEUE_URL`
+    // was the previous "it can never be deployed" argument and it was a claim about the
+    // proxy's configuration, not about who can reach this dashboard.
+    process.env.NODE_ENV = 'development';
+    process.env.VERCEL = '1';
+    const res = makeResponse();
+    await handler(
+      makeRequest('POST', { host: 'localhost:4002' }, { mode: '200' }),
+      res
+    );
+    expect((res as never as { _status: number })._status).toBe(404);
+  });
+
+  it('refuses a spoofed loopback Host on a deployed platform', async () => {
+    // The Host header is caller-controlled, which is why it is never the only arm.
+    process.env.NODE_ENV = 'production';
+    process.env.VERCEL_ENV = 'production';
+    const res = makeResponse();
+    await handler(
+      makeRequest('POST', { host: 'localhost' }, { mode: '200' }),
+      res
+    );
+    expect((res as never as { _status: number })._status).toBe(404);
+  });
+});
