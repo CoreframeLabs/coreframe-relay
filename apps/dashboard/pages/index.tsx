@@ -23,13 +23,11 @@ import Head from 'next/head';
 import type { ReactElement } from 'react';
 
 import HeroSection from '@/components/defaultLanding/HeroSection';
-import GapSection from '@/components/defaultLanding/GapSection';
 import LandingFooter from '@/components/defaultLanding/LandingFooter';
 import LandingNav from '@/components/defaultLanding/LandingNav';
-import LimitsSection from '@/components/defaultLanding/LimitsSection';
 import PricingSection from '@/components/defaultLanding/PricingSection';
 import ProofSection from '@/components/defaultLanding/ProofSection';
-import RoadmapSection from '@/components/defaultLanding/RoadmapSection';
+import SecuritySection from '@/components/defaultLanding/SecuritySection';
 import WhatItDoesSection from '@/components/defaultLanding/WhatItDoesSection';
 import env from '@/lib/env';
 import type { NextPageWithLayout } from 'types';
@@ -56,13 +54,18 @@ const LandingPage: NextPageWithLayout = () => {
       <div className="min-h-screen bg-[#0d0f12] text-[#9a9ea8] antialiased">
         <LandingNav />
         <main>
-          {/* Contract §3 section order: Hero (incl. Gap) → Proof → Product → How-it-works → Pricing/CTA → Footer. RELAY-55: every section sells the phase that exists — Buffer — and nothing else. */}
+          {/* Contract §3 section order: Hero (incl. Gap) → Proof → Product → Security → Pricing/CTA → Footer. RELAY-55: every section sells the phase that exists — Buffer — and nothing else.
+              [RELAY-71] The Gap used to render a second time here — HeroSection already
+              renders it internally (see HeroSection.tsx). That duplicate call, plus the
+              since-removed LimitsSection/RoadmapSection ("what Relay cannot do
+              today" / an explicit roadmap-is-vapourware section), are gone. The
+              facts LimitsSection carried (payload cap, DLQ header limitation) live on
+              inside PricingSection's disclosure; SecuritySection fills the freed slot
+              with capabilities that are actually true today. */}
           <HeroSection />
           <ProofSection />
           <WhatItDoesSection />
-          <GapSection />
-          <LimitsSection />
-          <RoadmapSection />
+          <SecuritySection />
           <PricingSection />
         </main>
         <LandingFooter />

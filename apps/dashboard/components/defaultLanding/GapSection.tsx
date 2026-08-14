@@ -9,10 +9,12 @@
  * then an amber retry ladder climbs attempt 1→503 · 2→503 · 3→200 ✓ (emerald),
  * with the surviving `RelayFlowDiagram` terminal nested inside the With pane.
  *
- * "Saved Payloads: 0" is the honest zero [AGENT-22 conservative-default, director
- * may reverse]: RELAY-68 has not shipped the counter infra and there are no signed
- * users yet, so the page shows the real count — zero — in mono tabular-nums rather
- * than a number it cannot back.
+ * [Launch-shape change] The "Saved Payloads: 0" counter that used to sit under the two
+ * panes is CUT. The zero-customer confession only needs to appear once on the page (the
+ * footer carries it now); repeating it here on top of Proof's caption and the old
+ * duplicate Gap render was the same admission four times before a reader ever reaches the
+ * CTA. The two terminal panes below are kept as-is — they are the strongest asset on the
+ * page and carry no customer-count claim at all.
  *
  * Motion is contract motion #3: one un-staggered two-pane replay, CSS keyframes on
  * opacity only. `prefers-reduced-motion: reduce` disables it wholesale — both panes
@@ -95,21 +97,6 @@ const GapSection = () => {
           </div>
         </Pane>
       </div>
-
-      {/* Honest zero — the count today is genuinely zero; there are no signed
-          customers. It stays zero until RELAY-68 wires it live, and the page says so. */}
-      <p className="relay-reveal mt-5 text-center font-mono text-sm text-zinc-400">
-        Saved Payloads:{' '}
-        <span
-          className="font-semibold tabular-nums text-[#f2f3f5]"
-          aria-label="Saved payloads, zero"
-        >
-          0
-        </span>{' '}
-        <span className="text-zinc-500">
-          — the real count. Nobody has signed up yet; first event moves it.
-        </span>
-      </p>
     </div>
   );
 };

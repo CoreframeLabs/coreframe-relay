@@ -7,9 +7,8 @@ const navLinks = [
   { href: '#proof', label: 'Proof' },
   { href: '#what-it-does', label: 'What it does' },
   { href: '#how-it-works', label: 'How it works' },
-  { href: '#pricing', label: 'Pricing' },
-  { href: '#limits', label: 'Limits' },
-  { href: '#roadmap', label: 'Roadmap' },
+  { href: '#security', label: 'Security' },
+  { href: '#founding-access', label: 'Founding Access' },
 ];
 
 const LandingNav = () => (
@@ -54,7 +53,7 @@ const LandingNav = () => (
           Sign in
         </Link>
         <LandingLink href="/auth/join" className="!px-4 !py-2">
-          Start the 14-day trial
+          Request Founding Access
         </LandingLink>
       </div>
     </nav>

@@ -10,6 +10,11 @@
  * No invented customers, logos, metrics or testimonials (RELAY-55 + the contract's
  * anti-brief #2). The row below is a shape-of-data still: requestId, timestamp,
  * status and retry history in the format `DeliveryLog` returns, not a real event.
+ *
+ * [Launch-shape change] The figcaption no longer repeats the zero-customer admission —
+ * that confession appears exactly once on the page now, in the footer. Restating it in
+ * every section it could technically apply to buries the one honest line that matters
+ * under three others saying the same thing.
  */
 import { useState } from 'react';
 
@@ -70,9 +75,8 @@ const ProofSection = () => {
             </code>
           </div>
           <figcaption className="border-t border-[#24262c] px-4 py-3 text-xs leading-relaxed text-[#9a9ea8]">
-            An example of the receipt&apos;s format, not a record of real traffic —
-            the Saved Payloads counter above is still at its honest zero. The moment
-            it moves, the strip links to it, which is a proof no logo wall ever is.
+            An example of the receipt&apos;s format, not a record of real traffic.
+            Sign up, fire one request, and the next row you see is your own.
           </figcaption>
         </figure>
       </div>
