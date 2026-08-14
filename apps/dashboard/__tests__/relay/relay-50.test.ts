@@ -215,6 +215,86 @@ describe('qstash-test [RELAY-50]', () => {
   });
 });
 
+// ─── qstash-test is unreachable on a deployed dashboard [RELAY-72] ────────────────
+
+/**
+ * The endpoint skips `verifySignature` and takes its destination from a caller-supplied
+ * envelope, so "reachable in production" is a forged-envelope injection into the forward
+ * path. Its previous defence was the claim that `RELAY_LOCAL_QUEUE_URL` is never set on a
+ * deployed Worker — a fact about the PROXY's configuration, which does not stop anyone
+ * POSTing to a Next.js API route that `next build` compiled into the bundle.
+ */
+describe('qstash-test local-only guard [RELAY-72]', () => {
+  const originalEnv = process.env;
+
+  beforeEach(() => {
+    process.env = { ...originalEnv, RELAY_API_SECRET: 's'.repeat(48) };
+    for (const marker of ['VERCEL', 'VERCEL_ENV', 'VERCEL_URL', 'RENDER']) {
+      delete process.env[marker];
+    }
+  });
+
+  afterAll(() => {
+    process.env = originalEnv;
+  });
+
+  it('answers 404 in a production build on a remote host, even WITH the valid bearer', async () => {
+    process.env.NODE_ENV = 'production';
+    const handler = loadQstashTest();
+    const req = makeRequest(
+      'POST',
+      {
+        'content-type': 'application/json',
+        host: 'relay.coreframe-labs.dev',
+        authorization: `Bearer ${process.env.RELAY_API_SECRET}`,
+      },
+      '{}'
+    );
+    const res = makeResponse();
+    await handler(req, res);
+    // 404 rather than 401: holding the shared secret does not make this endpoint
+    // legitimate on a deployed dashboard, and the environment gate runs BEFORE the
+    // secret is compared, so a deployed instance never performs the comparison at all.
+    expect(statusOf(res)).toBe(404);
+  });
+
+  it('answers 404 when a deploy-platform marker is set, whatever NODE_ENV says', async () => {
+    process.env.NODE_ENV = 'development';
+    process.env.VERCEL = '1';
+    const handler = loadQstashTest();
+    const req = makeRequest(
+      'POST',
+      {
+        'content-type': 'application/json',
+        host: 'localhost:4002',
+        authorization: `Bearer ${process.env.RELAY_API_SECRET}`,
+      },
+      '{}'
+    );
+    const res = makeResponse();
+    await handler(req, res);
+    expect(statusOf(res)).toBe(404);
+  });
+
+  it('still answers on a production build over loopback (the local smoke keeps working)', async () => {
+    process.env.NODE_ENV = 'production';
+    const handler = loadQstashTest();
+    const req = makeRequest(
+      'POST',
+      {
+        'content-type': 'application/json',
+        host: '127.0.0.1:4002',
+        authorization: `Bearer ${process.env.RELAY_API_SECRET}`,
+      },
+      'not-json'
+    );
+    const res = makeResponse();
+    await handler(req, res);
+    // 400 = it got past the environment gate and past the bearer, and failed on the body.
+    expect(statusOf(res)).toBe(400);
+  });
+});
+
 // ─── consumeEnvelope: isTest propagation ─────────────────────────────────────────
 
 // Hoisted mocks (jest.mock at module level, not doMock inside a test). Module-level
