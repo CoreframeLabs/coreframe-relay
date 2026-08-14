@@ -124,6 +124,63 @@ function log(event: string, fields: Record<string, unknown>): void {
   console.log(JSON.stringify({ level: 'info', event, ...fields }));
 }
 
+/** Hosts a request can only arrive on when it never left the machine. */
+const LOOPBACK_HOSTNAMES = new Set(['localhost', '127.0.0.1', '::1']);
+
+const isLoopbackHostname = (hostname: string): boolean =>
+  LOOPBACK_HOSTNAMES.has(hostname.replace(/^\[|\]$/g, '').toLowerCase());
+
+/**
+ * [RELAY-73] Is the smoke-test SSRF waiver applicable to THIS request?
+ *
+ * ─── THE FINDING ─────────────────────────────────────────────────────────────────────
+ *
+ * The waiver used to turn on when `x-relay-event: test` was present and
+ * `RELAY_LOCAL_QUEUE_URL` happened to be bound. That makes a REQUEST HEADER the switch on
+ * the product's central security control, and it rests the whole guarantee on one
+ * environment variable being *unset* in production. "Unset" is not a control — it is the
+ * absence of one, and it fails open the first time someone copies a working dev
+ * configuration into a deployed environment to debug something. The comment even asserted
+ * "this branch cannot exist on a deployed Worker", which is a claim about how we intend to
+ * configure things, not a property of the system.
+ *
+ * ─── THE CONTROL ─────────────────────────────────────────────────────────────────────
+ *
+ * Arm 1 is the structural one and it depends on no configuration at all: the request must
+ * have ARRIVED on a loopback host. A deployed Worker is reached at a workers.dev subdomain
+ * or a zone hostname; Cloudflare routes by Host, so a request bearing `Host: localhost`
+ * never matches a route and never reaches us. There is no value of any environment
+ * variable that makes arm 1 true in production.
+ *
+ * The remaining arms are defence in depth, each independently sufficient to refuse:
+ *   2. `ENVIRONMENT` must be exactly `development` — set from wrangler.toml `[vars]`, and
+ *      `production`/`staging` override it in their own env blocks.
+ *   3. the local queue stand-in must be the publisher;
+ *   4. the request must be test-marked;
+ *   5. the destination must be loopback on the SAME protocol and port as the dashboard
+ *      the proxy already trusts for route lookup — not arbitrary loopback.
+ *
+ * All five must hold. Arms 2-5 alone would still be caller-influenced; arm 1 is the one
+ * that makes this impossible to reach in a deployed production environment rather than
+ * merely improbable.
+ */
+function smokeWaiverApplies(
+  requestUrl: string,
+  env: AppEnv['Bindings'],
+  isTestSend: boolean
+): boolean {
+  if (!isTestSend) return false;
+  if (env.ENVIRONMENT !== 'development') return false;
+  if (!env.RELAY_LOCAL_QUEUE_URL) return false;
+
+  try {
+    // Arm 1 — structural. Unreachable on any deployed Worker.
+    return isLoopbackHostname(new URL(requestUrl).hostname);
+  } catch {
+    return false;
+  }
+}
+
 /**
  * The two forms share one handler.
  *
@@ -237,25 +294,24 @@ export const ingest = new Hono<AppEnv>()
      * The reason string is logged, never returned: it names the host, and the host is the
      * customer's private infrastructure.
      *
-     * ONE waiver exists, and it is narrower than it looks: [RELAY-66]'s launch smoke
-     * test must deliver into `/api/relay/smoke-destination` on the local dashboard,
-     * which the literal-address validator above correctly rejects as loopback. The
-     * waiver fires only when ALL of these hold:
-     *   - `RELAY_LOCAL_QUEUE_URL` is configured, i.e. the local queue stand-in is the
-     *     publisher — this branch cannot exist on a deployed Worker, where that binding
-     *     is never set;
-     *   - the request is `x-relay-event: test`-marked — a real webhook can NEVER take
-     *     this path;
-     *   - the destination's host is exactly loopback AND its port is exactly the port of
-     *     `RELAY_DASHBOARD_URL`'s own origin — the smoke destination is the same app the
-     *     proxy already trusts for route lookup and consumer callbacks, not arbitrary
-     *     loopback.
+     * ONE waiver exists — [RELAY-66]'s launch smoke test must deliver into
+     * `/api/relay/smoke-destination` on the local dashboard, which the literal-address
+     * validator correctly rejects as loopback. [RELAY-73] rebuilt the gate on it:
+     * `smokeWaiverApplies` above requires the request to have ARRIVED on a loopback host,
+     * which no deployed Worker can satisfy at any setting of any environment variable.
+     * Read the comment on that function before touching this branch — the previous gate
+     * was a request header plus one unset binding, which is a switch the caller holds.
+     *
      * The envelope still records isTest=true, so the row the smoke asserts on is marked
      * as what it is rather than impersonating production truth.
      */
     const isTestSend = c.req.header('x-relay-event') === 'test';
     let destination = validateDestination(route.destination);
-    if (!destination.ok && isTestSend && c.env.RELAY_LOCAL_QUEUE_URL && c.env.RELAY_DASHBOARD_URL) {
+    if (
+      !destination.ok &&
+      c.env.RELAY_DASHBOARD_URL &&
+      smokeWaiverApplies(c.req.url, c.env, isTestSend)
+    ) {
       try {
         const destUrl = new URL(route.destination);
         const dashUrl = new URL(c.env.RELAY_DASHBOARD_URL);

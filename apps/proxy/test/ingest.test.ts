@@ -592,3 +592,94 @@ describe('[RELAY-57] path ingest token', () => {
 function fakeKvUnbound(): undefined {
   return undefined;
 }
+
+// ─── [RELAY-73] The smoke waiver cannot be reached in a deployed environment ─────────
+
+/**
+ * The waiver used to fire on `x-relay-event: test` + `RELAY_LOCAL_QUEUE_URL` being bound.
+ * That is a REQUEST HEADER switching off the product's central security control, with the
+ * production guarantee resting on one environment variable being *unset* — which is the
+ * absence of a control, not a control, and it fails open the moment a working dev config
+ * is copied into a deployed environment.
+ *
+ * The structural arm is now "the request must have ARRIVED on a loopback host". Cloudflare
+ * routes by Host, so no request bearing `Host: localhost` reaches a deployed Worker, and
+ * there is no setting of any variable that makes that arm true in production. The cases
+ * below drive each arm independently.
+ */
+describe('[RELAY-73] smoke-test SSRF waiver', () => {
+  // The smoke destination: loopback, same origin as RELAY_DASHBOARD_URL. The literal-
+  // address validator correctly rejects it, which is why the waiver exists at all.
+  const smokeRoute = {
+    ...activeRoute,
+    destination: 'http://localhost:4002/api/relay/smoke-destination',
+  };
+
+  const localEnv = {
+    ...baseEnv,
+    RELAY_LOCAL_QUEUE_URL: 'http://localhost:4002',
+  };
+
+  const send = (origin: string, env: Record<string, unknown>, headers: Record<string, string> = {}) =>
+    app.request(
+      `${origin}/in/acme/stripe/${INGEST_TOKEN}`,
+      {
+        method: 'POST',
+        headers: { 'content-type': 'application/json', 'x-relay-event': 'test', ...headers },
+        body: '{"id":"evt_smoke"}',
+      },
+      env
+    );
+
+  beforeEach(() => {
+    mockFetch({ lookup: { status: 200, body: smokeRoute } });
+  });
+
+  it('fires for the local smoke — dev, loopback arrival, local queue, test-marked', async () => {
+    const res = await send('http://localhost:8787', localEnv);
+    expect(res.status).toBe(200);
+  });
+
+  it('does NOT fire when the request arrived on a public hostname (the structural arm)', async () => {
+    // Same env, same header, same destination — only the arrival host differs. This is
+    // the arm that no environment variable can switch back on.
+    const res = await send('https://relay-proxy.coreframe-labs.dev', localEnv);
+    expect(res.status).toBe(502);
+    expect(await res.json()).toMatchObject({ error: 'route destination is not permitted' });
+  });
+
+  it('does NOT fire when ENVIRONMENT is production, even arriving on loopback', async () => {
+    const res = await send('http://localhost:8787', {
+      ...localEnv,
+      ENVIRONMENT: 'production' as const,
+    });
+    expect(res.status).toBe(502);
+  });
+
+  it('does NOT fire when ENVIRONMENT is staging', async () => {
+    const res = await send('http://localhost:8787', {
+      ...localEnv,
+      ENVIRONMENT: 'staging' as const,
+    });
+    expect(res.status).toBe(502);
+  });
+
+  it('does NOT fire without the local queue binding', async () => {
+    const res = await send('http://localhost:8787', baseEnv);
+    expect(res.status).toBe(502);
+  });
+
+  it('does NOT fire for a request that is not test-marked', async () => {
+    const res = await send('http://localhost:8787', localEnv, { 'x-relay-event': 'real' });
+    expect(res.status).toBe(502);
+  });
+
+  it('never waives a NON-loopback internal destination, even on the local smoke path', async () => {
+    // The waiver is scoped to the dashboard's own origin. Cloud metadata is not it.
+    mockFetch({
+      lookup: { status: 200, body: { ...activeRoute, destination: 'http://169.254.169.254/latest/meta-data/' } },
+    });
+    const res = await send('http://localhost:8787', localEnv);
+    expect(res.status).toBe(502);
+  });
+});
