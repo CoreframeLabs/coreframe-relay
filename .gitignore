@@ -37,3 +37,7 @@ graphify-out/cost.json
 
 # graphify generated index — rebuilt by `graphify update .`, never hand-edited.
 graphify-out/
+
+# git worktrees (parallel agent branches) - not repo content.
+.kilo-worktrees/
+.worktrees/
