@@ -13,6 +13,11 @@ export * from './route';
 export * from './delivery';
 export * from './dlq';
 export * from './approval';
+// [RELAY-33] The SSRF destination validator. It is a security control rather than a
+// schema, and it lives in this package for the same reason the schemas do: both apps
+// must run the SAME one. A second copy on the forward path is the failure this move
+// exists to prevent — two copies drift silently and both then look correct.
+export * from './ssrf';
 // The proxy↔dashboard internal contract. Exported here so both apps import it as
 // `@coreframe-relay/types` rather than by relative path across an app boundary — the
 // package's `exports` map only exposes `"."`, so a subpath import does not resolve.
