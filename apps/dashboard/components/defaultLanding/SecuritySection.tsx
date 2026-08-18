@@ -9,18 +9,37 @@
  *  - AES-256-GCM at rest: `apps/dashboard/lib/relay/destinationAuth.ts` — random IV per
  *    value, GCM auth tag, fails closed on tamper.
  *  - CI (Gitleaks + Semgrep + Trivy): `.github/workflows/ci.yml` — `secret-scan`, `sast`
- *    and `dependency-audit` jobs, all required by the `ci-required` aggregator.
+ *    and `dependency-audit` jobs, each exiting non-zero on a CRITICAL/HIGH finding.
  *  - Public disclosure policy: `SECURITY.md` at the repo root, with stated SLAs.
+ *
+ * [D7 claims-vs-code audit fix] Two corrections made during the D7 pass:
+ *  1. The old copy said "all three are required checks. Nothing merges past a CRITICAL or
+ *     HIGH finding." `ci.yml`'s own comment above `ci-required` reads "Add ... as the
+ *     required status check in Settings → Branches" — an instruction to a human, not a
+ *     confirmed setting. Whether GitHub branch protection actually blocks a merge on
+ *     failure is a repo-admin console setting this repo checkout cannot verify, so the
+ *     claim is narrowed to what the workflow file itself proves: each job runs on every
+ *     push/PR and fails the build on a CRITICAL/HIGH finding.
+ *  2. The old copy said "Report to security@ or umar.ali@coreframe-labs.dev". A repo-wide
+ *     search found `security@...` written nowhere else — not in `SECURITY.md`, not in any
+ *     env var, not in any DNS/email-routing note — only on this landing page. `SECURITY.md`
+ *     itself names exactly one address. Claiming a mailbox nobody has provisioned is the
+ *     exact class of error this audit exists to catch, so the copy now matches
+ *     `SECURITY.md` verbatim: one address.
  *
  * One claim is DELIBERATELY narrower than the original brief asked for: SSRF validation.
  * The real literal-address validator (`apps/proxy/src/services/ssrf.ts`, RFC-1918 +
- * loopback + link-local/metadata + blocked ports) runs at INGEST time only. At the point
- * this section was written, `apps/dashboard/lib/relay/ssrfGap.ts` is still a shape-only
- * stand-in at forward time — its own file header calls this "a KNOWN SECURITY GAP" and
- * names RELAY-33 as the fix, which a concurrent security lane owns on a different branch
- * and has not yet merged. The copy below says only what is true right now (checked at
- * ingest, before anything is ever queued) and does not claim forward-time or DLQ-replay
- * re-validation. Re-check `ssrfGap.ts` before widening this claim once RELAY-33 lands.
+ * loopback + link-local/metadata + blocked ports) runs at INGEST time only. As of the D7
+ * gate, `apps/dashboard/lib/relay/ssrfGap.ts` on `main` (and on this branch, which forked
+ * from `main` at the same commit) is still a shape-only stand-in at forward time — its own
+ * file header calls this "a KNOWN SECURITY GAP" and names RELAY-33 as the fix. RELAY-33 IS
+ * fixed on `relay/sec-criticals` (confirmed by reading that branch's `ssrfGap.ts` directly:
+ * it now re-exports the real validator) but that branch had NOT merged into `main` as of
+ * this audit. The copy below says only what is true right now on the code this page ships
+ * from (checked at ingest, before anything is ever queued) and does not claim forward-time
+ * or DLQ-replay re-validation. If `relay/sec-criticals` merges before this branch does,
+ * this claim can be safely widened — but not before, and not on the strength of the other
+ * branch existing.
  */
 import { Card, Section, SectionHeading, StatusChip } from './LandingPrimitives';
 
@@ -35,11 +54,11 @@ const capabilities = [
   },
   {
     title: 'CI gates on every commit',
-    body: 'Gitleaks for secrets, Semgrep for static analysis, and Trivy for dependency vulnerabilities — all three are required checks. Nothing merges past a CRITICAL or HIGH finding.',
+    body: 'Gitleaks for secrets, Semgrep for static analysis, and Trivy for dependency vulnerabilities all run on every push and pull request, and each fails the build on a CRITICAL or HIGH finding.',
   },
   {
     title: 'Public vulnerability disclosure',
-    body: 'A published policy with stated response SLAs — 24 hours for anything that could touch another team’s data. Report to security@ or umar.ali@coreframe-labs.dev; safe-harbor terms apply to good-faith testing.',
+    body: 'A published policy with stated response SLAs — 24 hours for anything that could touch another team’s data. Report to umar.ali@coreframe-labs.dev; safe-harbor terms apply to good-faith testing.',
   },
 ];
 

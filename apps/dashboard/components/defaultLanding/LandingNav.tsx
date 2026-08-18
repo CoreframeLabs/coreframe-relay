@@ -1,4 +1,14 @@
-/** [RELAY-64 v2] Public landing navigation. */
+/**
+ * [RELAY-64 v2] Public landing navigation.
+ *
+ * [D7 claims-vs-code audit fix] "How it works" → `#how-it-works` was a dead in-page
+ * anchor: rendered SSR HTML has no element with that id anywhere on the page. The
+ * standalone how-it-works section this once pointed at was folded into the Gap
+ * (`RelayFlowDiagram` rendered `bare` inside `GapSection`, itself nested inside
+ * `HeroSection` with no id of its own) back when LimitsSection/RoadmapSection were cut.
+ * Removed rather than re-added, since re-introducing a real target section is new scope
+ * this gate day doesn't call for — a nav link to nowhere is worse than one fewer link.
+ */
 import Link from 'next/link';
 
 import { LandingLink, focusRing } from './LandingPrimitives';
@@ -6,7 +16,6 @@ import { LandingLink, focusRing } from './LandingPrimitives';
 const navLinks = [
   { href: '#proof', label: 'Proof' },
   { href: '#what-it-does', label: 'What it does' },
-  { href: '#how-it-works', label: 'How it works' },
   { href: '#security', label: 'Security' },
   { href: '#founding-access', label: 'Founding Access' },
 ];
