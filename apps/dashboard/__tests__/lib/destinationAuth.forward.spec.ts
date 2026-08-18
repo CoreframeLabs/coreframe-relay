@@ -39,8 +39,66 @@ afterEach(() => {
 });
 
 /**
+ * ⚠ WHY THE SSRF SEAM IS DOUBLED IN THIS FILE — [RELAY-33]. READ BEFORE EDITING.
+ *
+ * This suite stands up a real listener on a random LOOPBACK port, because its whole
+ * subject is "what value travels on the wire". [RELAY-33] made the forward path run the
+ * real SSRF validator instead of the shape-only stand-in, and the real validator blocks
+ * loopback — which is exactly the ticket's point. So every test here began failing at the
+ * destination check, having asserted nothing about headers.
+ *
+ * The failure was correct. There is no address a test can bind that the validator allows:
+ * loopback, RFC-1918 and link-local are all blocked, and anything it does allow is, by
+ * construction, not local. So one of three things has to give, and only one is acceptable:
+ *
+ *   ✗ Weaken the validator, or add a `skipSsrf` flag / env var to `forwardToDestination`.
+ *     That is the precise shape [RELAY-73] just spent a ticket deleting from the proxy: a
+ *     security control switched off by configuration, with production safety resting on a
+ *     variable happening to be unset. A door added for a test is still a door.
+ *   ✗ Route the tests through the production smoke waiver (loopback + port 4002 +
+ *     `isTest`). Tried and rejected: it pins the suite to the dashboard's own dev port, so
+ *     the tests fail to bind whenever `next dev` is running — measured, not theorised.
+ *   ✓ Double the COLLABORATOR in this file only, and assert the real one, unmocked, in
+ *     `ssrf.forward.spec.ts` next door.
+ *
+ * The double below is deliberately narrow: it delegates every decision to the real
+ * validator and overrides it for nothing except `127.0.0.1` on an ephemeral port — the
+ * throwaway listener these tests create and nothing else. `169.254.169.254`, `10.0.0.0/8`,
+ * `localhost` and every other blocked form are still refused inside this file.
+ *
+ * What this costs, stated plainly: this file no longer proves the forward path is
+ * SSRF-guarded. `ssrf.forward.spec.ts` does, against the real module, including the case
+ * where a live listener is waiting and must never be reached. Delete the validator call in
+ * `forward.ts` and that file goes red — this one would not. That split is why it exists.
+ */
+// Relative, not the `@/` alias: jest's resolver applies the alias to IMPORTS but not to
+// `jest.mock`'s hoisted specifier. Both forms resolve to the same file, so the module
+// registry entry `forward.ts` reads is the one replaced here.
+jest.mock('../../lib/relay/ssrfGap', () => {
+  const actual = jest.requireActual('../../lib/relay/ssrfGap');
+  return {
+    ...actual,
+    validateDestination: (raw: string) => {
+      const verdict = actual.validateDestination(raw);
+      if (verdict.ok) return verdict;
+      try {
+        const url = new URL(raw);
+        // The listener this file creates: literal 127.0.0.1, ephemeral port. Nothing else.
+        if (url.hostname === '127.0.0.1' && Number(url.port) >= 1024) {
+          return { ok: true, url };
+        }
+      } catch {
+        // A URL that will not parse stays rejected — the double never widens a failure.
+      }
+      return verdict;
+    },
+  };
+});
+
+/**
  * A throwaway HTTP server that returns 200 only when the caller presents the EXACT
  * bearer token configured. Counts every request received and records the headers seen.
+ *
  */
 function requireBearer(expectedToken: string): Promise<{
   port: number;
@@ -61,6 +119,7 @@ function requireBearer(expectedToken: string): Promise<{
   });
 
   return new Promise((resolve, reject) => {
+    server.on('error', reject);
     server.listen(0, '127.0.0.1', () => {
       const address = server.address();
       if (typeof address === 'object' && address !== null) {
@@ -193,7 +252,11 @@ describe('forwardToDestination — the RELAY-59 end-to-end', () => {
     // Not RELAY-59's concern directly, but every path the forwarder is wired into must
     // hold this: a return, never a throw. QStash reads the difference as retry-vs-dead.
     const outcome = await forwardToDestination({
-      destination: 'http://192.0.2.1/', // RFC 5737 — never routable
+      // TEST-NET-2, not TEST-NET-1. [RELAY-33]'s validator blocks 192.0.0.0/16 (its
+      // `a === 192 && b === 0` arm), which swallows RFC 5737's 192.0.2.0/24 — so the old
+      // address was refused at the destination check and never measured a timeout at all.
+      // 198.51.100.0/24 is equally unroutable and is not in any blocked range.
+      destination: 'http://198.51.100.1/', // RFC 5737 TEST-NET-2 — never routable
       headers: {},
       body: '{}',
       requestId: 'c2c4d4a0-0000-4000-8000-000000000005',
