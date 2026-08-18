@@ -1,14 +1,20 @@
 /**
  * [RELAY-64 v2] Footer — the reproducibility line and the anchors.
  *
- * Contract §3 (Footer): "not a dashboard. a receipt." plus the `#limits` /
- * `#roadmap` anchors. No newsletter box [contract §3, SYNTHESIS CALL].
+ * Contract §3 (Footer): "not a dashboard. a receipt." No newsletter box
+ * [contract §3, SYNTHESIS CALL].
+ *
+ * [Launch-shape change] `#limits` and `#roadmap` are gone — LimitsSection and
+ * RoadmapSection are both cut (see `pages/index.tsx`). This is also the ONE place
+ * the zero-customer admission survives; GapSection and ProofSection both used to
+ * repeat it and no longer do. Anchors now point at Security and Founding Access,
+ * the two sections that replaced Limits/Roadmap and Pricing respectively.
  *
  * The dev.to article link the contract asks for is DEFERRED: RELAY-70's article
  * is still an unwritten draft, and a pre-launch footer linking a 404 fails the
  * honesty bar harder than the omission. The no-commitment "three things to get
- * right" checklist it would have carried is inlined in the Pricing section's
- * <details> instead, and the footer notes the article is coming.
+ * right" checklist it would have carried is inlined in the Founding Access
+ * section's <details> instead, and the footer notes the article is coming.
  */
 import { LandingLink, focusRing } from './LandingPrimitives';
 
@@ -28,21 +34,21 @@ const LandingFooter = () => (
           </p>
           <nav aria-label="Footer" className="mt-4 flex flex-wrap gap-x-5 gap-y-2">
             <a
-              href="#limits"
+              href="#security"
               className={`rounded text-sm text-[#9a9ea8] transition-colors hover:text-zinc-100 ${focusRing}`}
             >
-              What Relay cannot do
+              Security
             </a>
             <a
-              href="#roadmap"
+              href="#founding-access"
               className={`rounded text-sm text-[#9a9ea8] transition-colors hover:text-zinc-100 ${focusRing}`}
             >
-              Roadmap
+              Founding Access
             </a>
           </nav>
         </div>
         <div className="flex flex-col items-stretch gap-3 sm:flex-row sm:items-center">
-          <LandingLink href="/auth/join">Start the 14-day trial</LandingLink>
+          <LandingLink href="/auth/join">Request Founding Access</LandingLink>
         </div>
       </div>
     </div>
