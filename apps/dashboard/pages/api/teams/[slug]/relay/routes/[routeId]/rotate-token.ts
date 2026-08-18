@@ -5,6 +5,7 @@ import { throwIfNotAllowed } from 'models/user';
 import { relayUrlFor, rotateIngestToken } from 'models/route';
 import { recordAuditEvent } from '@/lib/audit';
 import { recordMetric } from '@/lib/metrics';
+import { withTeamScope } from '@/lib/db/scope';
 
 /**
  * POST /api/teams/:slug/relay/routes/:routeId/rotate-token — [RELAY-57]
@@ -19,9 +20,12 @@ import { recordMetric } from '@/lib/metrics';
  * echoed to a log line, an audit metadata field, or an error body.
  */
 
-export default async function handler(req: NextApiRequest, res: NextApiResponse) {
+export default async function handler(
+  req: NextApiRequest,
+  res: NextApiResponse
+) {
   try {
-    await throwIfNoTeamAccess(req, res);
+    const teamMember = await throwIfNoTeamAccess(req, res);
 
     if (req.method !== 'POST') {
       res.setHeader('Allow', 'POST');
@@ -30,52 +34,62 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
       });
     }
 
-    const user = await getCurrentUserWithTeam(req, res);
-    // Rotating a credential is a write, not a read — same gate as creating the route.
-    throwIfNotAllowed(user, 'team', 'update');
+    // [RELAY-84] `rotateIngestToken` is an `updateMany` on `Route` followed by a
+    // re-read. Unscoped under `relay_app` the UPDATE matches zero rows and the
+    // function throws its own 404 "Route not found." — so an operator rotating a
+    // credential after a suspected compromise would be told the route does not
+    // exist, and the old token would stay live. Scope comes from the verified
+    // membership, never from the request.
+    await withTeamScope(teamMember.teamId, async () => {
+      const user = await getCurrentUserWithTeam(req, res);
+      // Rotating a credential is a write, not a read — same gate as creating the route.
+      throwIfNotAllowed(user, 'team', 'update');
 
-    const { routeId } = req.query;
-    if (typeof routeId !== 'string' || routeId.length === 0) {
-      return res.status(400).json({ error: { message: 'routeId is required' } });
-    }
+      const { routeId } = req.query;
+      if (typeof routeId !== 'string' || routeId.length === 0) {
+        res.status(400).json({ error: { message: 'routeId is required' } });
+        return;
+      }
 
-    const route = await rotateIngestToken(user.team.id, routeId);
+      const route = await rotateIngestToken(user.team.id, routeId);
 
-    await recordAuditEvent({
-      teamId: user.team.id,
-      event: 'route.token_rotated',
-      actor: user.email,
-      target: route.id,
-      // The new token is deliberately ABSENT. An audit row that carries a live
-      // credential stops being an audit trail and starts being a second credential
-      // store with a worse access policy.
-      metadata: { name: route.name, slug: route.slug },
+      await recordAuditEvent({
+        teamId: user.team.id,
+        event: 'route.token_rotated',
+        actor: user.email,
+        target: route.id,
+        // The new token is deliberately ABSENT. An audit row that carries a live
+        // credential stops being an audit trail and starts being a second credential
+        // store with a worse access policy.
+        metadata: { name: route.name, slug: route.slug },
+      });
+
+      recordMetric('route.token_rotated');
+
+      // Cache headers: the response carries a live credential, so nothing downstream may
+      // keep it. `no-store` beats `no-cache`: an intermediary holding the old URL keeps
+      // a revoked secret, an intermediary holding the new one is the leak.
+      res.setHeader('Cache-Control', 'no-store');
+      res.status(200).json({
+        // Hand-built, never `{ ...route }`: that row now carries `destinationHeadersEncrypted`
+        // (RELAY-59) and spreading it would ship ciphertext to a client that has no use
+        // for it and no protection for it. Fields listed one at a time so a new column
+        // defaults to NOT being exposed.
+        data: {
+          id: route.id,
+          teamId: route.teamId,
+          name: route.name,
+          slug: route.slug,
+          destination: route.destination,
+          maxRetries: route.maxRetries,
+          status: route.status,
+          createdAt: route.createdAt,
+          updatedAt: route.updatedAt,
+          relayUrl: relayUrlFor(user.team.slug, route.slug, route.ingestToken),
+        },
+      });
     });
-
-    recordMetric('route.token_rotated');
-
-    // Cache headers: the response carries a live credential, so nothing downstream may
-    // keep it. `no-store` beats `no-cache`: an intermediary holding the old URL keeps
-    // a revoked secret, an intermediary holding the new one is the leak.
-    res.setHeader('Cache-Control', 'no-store');
-    return res.status(200).json({
-      // Hand-built, never `{ ...route }`: that row now carries `destinationHeadersEncrypted`
-      // (RELAY-59) and spreading it would ship ciphertext to a client that has no use
-      // for it and no protection for it. Fields listed one at a time so a new column
-      // defaults to NOT being exposed.
-      data: {
-        id: route.id,
-        teamId: route.teamId,
-        name: route.name,
-        slug: route.slug,
-        destination: route.destination,
-        maxRetries: route.maxRetries,
-        status: route.status,
-        createdAt: route.createdAt,
-        updatedAt: route.updatedAt,
-        relayUrl: relayUrlFor(user.team.slug, route.slug, route.ingestToken),
-      },
-    });
+    return;
   } catch (error: any) {
     const message = error.message || 'Something went wrong';
     const status = error.status || 500;

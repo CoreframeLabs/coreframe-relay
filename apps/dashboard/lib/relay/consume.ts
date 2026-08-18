@@ -48,7 +48,8 @@ export async function consumeEnvelope(
     isTest = false,
   } = envelope;
 
-  const retriesSoFar = Number.isFinite(retriedRaw) && retriedRaw >= 0 ? retriedRaw : 0;
+  const retriesSoFar =
+    Number.isFinite(retriedRaw) && retriedRaw >= 0 ? retriedRaw : 0;
   const attemptCount = retriesSoFar + 1;
   const isFinalAttempt = retriesSoFar >= maxRetries;
 
@@ -57,8 +58,37 @@ export async function consumeEnvelope(
   // Tenant check BEFORE the outbound request, not after. See the comment in the
   // original qstash handler — a cross-tenant envelope was POSTing to the destination
   // before failing with a 500, and 500 meant "retry" to QStash.
+  //
+  // ── [RELAY-84] WHY THIS ASSERT IS ITSELF SCOPED ──────────────────────────────────
+  //
+  // This read USED to run outside any scope, and that was the single most damaging
+  // unwrapped call site in the Relay path — worse than any of the six dashboard
+  // handlers, because it breaks delivery rather than a page. MEASURED under
+  // `relay_app` (rolbypassrls=f): `assertRouteBelongsToTeam` on a VALID (teamId,
+  // routeId) pair throws `Route not found.` when unscoped, and succeeds when scoped.
+  // Unscoped, the policy sees NULL, the lookup finds nothing, the `catch` below fires,
+  // and this function answers 400 `bad_request` — which QStash reads as permanent, so
+  // it does not retry. After the G2a flip that is EVERY delivery rejected at the
+  // consumer, with no DeliveryLog row and no DlqItem, while the proxy has already
+  // told the customer 200 at ingest. A total, silent delivery outage.
+  //
+  // Scoping to `teamId` here does NOT weaken the check, which is the only reason it is
+  // allowed to be the envelope's unverified claim. The query is
+  // `where: { id: routeId, teamId }` — the RLS predicate the scope adds is
+  // `"teamId" = <claim>`, textually the same constraint the WHERE already carries. It
+  // is redundant, so it cannot surface a row the unscoped form would not have. The
+  // assert's actual job survives intact: an envelope pairing team X with team Y's
+  // route still finds nothing, because `WHERE teamId = X` excludes it no matter what
+  // the scope says.
+  //
+  // What must NOT move is the ORDERING. Everything that WRITES still happens inside
+  // the second `withTeamScope` below, entered only after the database has confirmed
+  // the pair. Scope-then-verify would be scoping on a claim in order to trust it;
+  // this is scoping a query that already constrains itself to the same value.
   try {
-    await assertRouteBelongsToTeam(teamId, routeId);
+    await withTeamScope(teamId, () =>
+      assertRouteBelongsToTeam(teamId, routeId)
+    );
   } catch {
     console.error('[relay] qstash: envelope route/team pair does not exist', {
       requestId,
@@ -68,9 +98,8 @@ export async function consumeEnvelope(
 
   // [RELAY-39 wiring — docs/rls.md step 3] The envelope's teamId is the caller's
   // claim; `assertRouteBelongsToTeam` above is the database's word that the pair
-  // belongs together. Scope is established only AFTER that word, never before —
-  // done on the claim and the claim is the scope, which is exactly what the
-  // assert exists to stop.
+  // belongs together. The scope that guards the WRITES is established only AFTER
+  // that word, never before.
   return withTeamScope(teamId, async () => {
     // ── [RELAY-59] Decrypt the customer-configured destination auth headers. ──────
     //
@@ -108,9 +137,12 @@ export async function consumeEnvelope(
               deliveredAt: null,
               isTest,
             });
-            console.error('[relay] qstash: destination headers tampered or key changed', {
-              requestId,
-            });
+            console.error(
+              '[relay] qstash: destination headers tampered or key changed',
+              {
+                requestId,
+              }
+            );
             // 200 on purpose: this is OUR failure, not QStash's or the destination's,
             // and a non-2xx would drive retries that achieve nothing.
             return res.status(200).json({ status: 'failed', requestId });
