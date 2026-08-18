@@ -1,0 +1,121 @@
+# RELAY-83 — the production migration path that did not exist before this file.
+#
+# See docs/deploy-runbook.md for the numbered sequence this workflow implements and the
+# full env-var inventory. Short version of why this file has the shape it has:
+#
+# Two migration systems govern this schema and `prisma migrate deploy` only knows about
+# one of them:
+#   - apps/dashboard/prisma/migrations/  — Prisma ORM tables, tracked in `_prisma_migrations`.
+#   - supabase/migrations/               — RLS (RELAY-11/39), tracked in
+#     `supabase_migrations.schema_migrations`. Prisma has no representation for
+#     `FORCE ROW LEVEL SECURITY` or `CREATE POLICY`, so `prisma migrate deploy` does NOT
+#     apply this directory — reproduced independently on staging and production
+#     (docs/rls.md) and it would ship silently both times if this workflow only ran the
+#     Prisma step and trusted its exit code.
+#
+# So three steps run, in order, and only the third is treated as proof: prisma migrate
+# deploy -> supabase db push (RLS) -> a direct SQL verification query
+# (apps/dashboard/scripts/verify-rls.sh). A green `migrate deploy` is not evidence RLS is
+# live; only the query is.
+#
+# Manual trigger only, deliberately. No push trigger exists here — a production schema
+# change is a human decision, never a side effect of a branch merge.
+name: Migrate
+
+on:
+  workflow_dispatch:
+    inputs:
+      target:
+        description: 'Environment to migrate. Run staging first, always.'
+        required: true
+        type: choice
+        options:
+          - staging
+          - production
+      confirm:
+        description: 'Type the target name again exactly (e.g. "production"). A mismatch refuses the run.'
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  # Never cancel a migration mid-flight — that is how a schema is left half-applied.
+  group: migrate-${{ inputs.target }}
+  cancel-in-progress: false
+
+jobs:
+  guard:
+    name: Confirm input matches target
+    runs-on: ubuntu-latest
+    steps:
+      - name: Refuse unless confirm == target
+        run: |
+          if [ "${{ inputs.confirm }}" != "${{ inputs.target }}" ]; then
+            echo "::error::confirm ('${{ inputs.confirm }}') does not match target ('${{ inputs.target }}') — refusing to run a migration from what could be a typo."
+            exit 1
+          fi
+          echo "Confirmed: migrating ${{ inputs.target }}"
+
+  migrate:
+    name: Migrate ${{ inputs.target }}
+    needs: guard
+    runs-on: ubuntu-latest
+    # A GitHub Environment named exactly "staging" or "production" must exist with its
+    # own `DATABASE_MIGRATION_URL` secret, and — for "production" — required reviewers
+    # attached. This is a one-time repo Settings action (Settings → Environments) that
+    # this file cannot perform; see docs/deploy-runbook.md step 0.
+    environment: ${{ inputs.target }}
+    env:
+      # RELAY-41's whole point, restated as a pipeline constraint: the migration
+      # credential is NOT the app's runtime credential. This secret must be a role with
+      # DDL (CREATE/ALTER/DROP), separate from RELAY_APP_DATABASE_URL / the deployed
+      # app's DATABASE_URL (relay_app, granted NO DDL by 20260804120000_relay_app_login_and_grants.sql).
+      # Prisma only ever reads env("DATABASE_URL") from schema.prisma — there is no
+      # separate Prisma-native variable name for this — so this step-scoped export is
+      # how the two stay distinct in GitHub's secret store while satisfying Prisma's
+      # fixed variable name at the shell level, and only for the duration of this job.
+      DATABASE_URL: ${{ secrets.DATABASE_MIGRATION_URL }}
+    steps:
+      - name: Refuse to run with no migration credential
+        run: |
+          if [ -z "$DATABASE_URL" ]; then
+            echo "::error::secrets.DATABASE_MIGRATION_URL is not set for the '${{ inputs.target }}' environment. This workflow will not invent a credential — add it under Settings → Environments → ${{ inputs.target }} → Secrets, then re-run. See docs/deploy-runbook.md's env inventory."
+            exit 1
+          fi
+
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: pnpm
+
+      - run: pnpm install --frozen-lockfile
+
+      - name: Show pending Prisma migrations (informational — not a gate)
+        working-directory: apps/dashboard
+        run: pnpm exec prisma migrate status || true
+
+      - name: prisma migrate deploy — Prisma-tracked schema ONLY (RLS is the next step)
+        working-directory: apps/dashboard
+        run: pnpm exec prisma migrate deploy
+
+      - name: supabase db push — the RLS migration, as its own step
+        run: pnpm exec supabase db push --db-url "$DATABASE_URL"
+
+      - name: Verify RLS by direct query — never trust an exit code for this
+        run: bash apps/dashboard/scripts/verify-rls.sh "$DATABASE_URL"
+
+      - name: Record the outcome
+        if: always()
+        run: |
+          echo "## Migrate ${{ inputs.target }}" >> "$GITHUB_STEP_SUMMARY"
+          echo "- Triggered by: ${{ github.actor }}" >> "$GITHUB_STEP_SUMMARY"
+          echo "- SHA: ${{ github.sha }}" >> "$GITHUB_STEP_SUMMARY"
+          echo "- Result: ${{ job.status }}" >> "$GITHUB_STEP_SUMMARY"
+          echo "" >> "$GITHUB_STEP_SUMMARY"
+          echo "Paste this line into the dev log per docs/deploy-runbook.md (RELAY-83's own convention: dated, in writing, not assumed)." >> "$GITHUB_STEP_SUMMARY"
