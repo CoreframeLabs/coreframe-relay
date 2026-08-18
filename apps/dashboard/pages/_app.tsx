@@ -40,7 +40,9 @@ function MyApp({ Component, pageProps }: AppPropsWithLayout) {
     <>
       <Head>
         <title>{app.name}</title>
-        <link rel="icon" href="https://boxyhq.com/img/favicon.ico" />
+        {/* No Relay favicon asset exists yet — removed rather than serve
+            BoxyHQ's external one. Add public/favicon.ico and a <link> here
+            once real Relay icon art exists. */}
       </Head>
       <SessionProvider session={session}>
         <Toaster toastOptions={{ duration: 4000 }} />

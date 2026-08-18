@@ -4,7 +4,7 @@ Coreframe Relay is a pre-launch security infrastructure product. We take securit
 
 ## Reporting a Vulnerability
 
-Please report security vulnerabilities directly to **umar.ali@coreframe-labs.dev**. Do not open a public GitHub issue for security vulnerabilities.
+Please report security vulnerabilities directly to **info@coreframe-labs.dev**. Do not open a public GitHub issue for security vulnerabilities.
 
 ### What to Include
 
@@ -75,7 +75,7 @@ Coreframe Relay is not yet deployed in production. This is a pre-launch security
 
 ## Questions?
 
-If you have questions about this policy or need clarification, contact **umar.ali@coreframe-labs.dev**.
+If you have questions about this policy or need clarification, contact **info@coreframe-labs.dev**.
 
 ---
 
