@@ -80,19 +80,6 @@ const unAuthenticatedRoutes = [
   // QStash's request signature, both before touching any data.
   '/api/relay/internal/route-lookup',
   '/api/relay/qstash',
-  // [RELAY-50] Local-only test delivery sink. Auth is NOT a signature — it is the
-  // RELAY_API_SECRET shared with the proxy's dev environment, because the value of
-  // the local loop is proving the pipeline end-to-end, and a signature-verified
-  // receiver cannot be told "the signature was made by the proxy you are testing".
-  '/api/relay/qstash-test',
-  // [RELAY-66] The smoke-test destination answers to the pipeline, not to a browser,
-  // and is deliberately unauthenticated: the DLQ retry path (RELAY-8) replays the
-  // envelope with EMPTY headers, so no Bearer credential could ever reach a retried
-  // delivery. Without an entry here the middleware would redirect the consumer's
-  // outbound POST to /auth/login and the smoke leg could never drive a failure or a
-  // retry through the real pipeline. Local-only by construction — must not ship on a
-  // deployed dashboard regardless of this allowlist entry.
-  '/api/relay/smoke-destination',
   // [RELAY-50] The catcher is a per-route webhook receiver, and its whole point is
   // reachable from the browser for a user who has not yet wired a destination. The URL
   // is the credential (same reasoning as the ingest token itself, RELAY-57). It must
@@ -107,11 +94,44 @@ const unAuthenticatedRoutes = [
   '/.well-known/*',
 ];
 
+/**
+ * Paths that are unauthenticated ONLY in a non-production build — [RELAY-72], [RELAY-74].
+ *
+ * Both are local-only test rigs, and both previously sat in the list above unconditionally:
+ *
+ *  - `/api/relay/qstash-test` [RELAY-50] is the local stand-in for the QStash consumer.
+ *    It skips `verifySignature` and takes its destination from a caller-supplied envelope,
+ *    so an unauthenticated production entry is a forged-envelope injection into the
+ *    forward path. Its own auth is the RELAY_API_SECRET shared with the proxy's dev
+ *    environment — a signature-verified receiver cannot be told "the signature was made
+ *    by the proxy you are testing", which is why it is a bearer and not a signature.
+ *  - `/api/relay/smoke-destination` [RELAY-66] is the faux destination the launch smoke
+ *    drives a 500 and then a 200 through. It genuinely cannot hold a credential: the DLQ
+ *    retry path (RELAY-8) replays the envelope with EMPTY headers, so no Bearer the route
+ *    was created with could ever reach a retried delivery.
+ *
+ * Without an entry here in local dev the middleware would redirect the pipeline's own
+ * outbound POST to `/auth/login`, and the smoke leg could never drive a failure or a retry
+ * through the real pipeline. `NODE_ENV` is inlined into the Edge bundle at build time, so
+ * in a production build these strings are not merely unmatched — the entries do not exist.
+ *
+ * This is the OUTER of two independent controls. Each handler also calls
+ * `localOnlyVerdict` itself and answers 404, so a session-authenticated user on a deployed
+ * dashboard (who would pass the middleware regardless of this list) still cannot reach one.
+ */
+const localOnlyUnauthenticatedRoutes =
+  process.env.NODE_ENV === 'production'
+    ? []
+    : ['/api/relay/qstash-test', '/api/relay/smoke-destination'];
+
 export default async function middleware(req: NextRequest) {
   const { pathname } = req.nextUrl;
 
   // Bypass routes that don't require authentication
-  if (micromatch.isMatch(pathname, unAuthenticatedRoutes)) {
+  if (
+    micromatch.isMatch(pathname, unAuthenticatedRoutes) ||
+    micromatch.isMatch(pathname, localOnlyUnauthenticatedRoutes)
+  ) {
     return NextResponse.next();
   }
 

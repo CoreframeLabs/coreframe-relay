@@ -1,73 +1,52 @@
-import { DestinationUrlSchema } from '@coreframe-relay/types';
-
 /**
- * ⚠ KNOWN SECURITY GAP — the consumer does NOT run the real SSRF validator. [RELAY-5]
+ * SSRF destination validator on the FORWARD path — re-export seam. [RELAY-33].
  *
- * THE GAP, stated plainly so nobody reads this file as protection it is not:
+ * ─── THE GAP THIS FILE USED TO BE, AND IS NOT ANY MORE ───────────────────────────────
  *
- * The real validator — literal-address blocking for RFC-1918, loopback, link-local
- * (169.254.169.254), blocked hostnames, blocked ports and embedded credentials — was
- * built in [RELAY-4] and lives at `apps/proxy/src/services/ssrf.ts`. It is inside the
- * Cloudflare Worker package. This consumer runs in the Next.js dashboard and CANNOT
- * import across that boundary today, and copy-pasting the validator here would create a
- * second copy of security-critical logic that drifts silently from the first — which is
- * strictly worse than one honest gap, because both copies would then look correct.
+ * Until RELAY-33 this module was a Zod shape check and nothing else. `validateDestination`
+ * ran `DestinationUrlSchema` — "is this an absolute http(s) URL?" — which
+ * `http://169.254.169.254/latest/meta-data/` passes, because it IS one. The real validator
+ * (literal-address blocking for RFC-1918, loopback, link-local, blocked hostnames, blocked
+ * ports, embedded credentials, numeric host encodings) was built in RELAY-4 and lived
+ * inside the Cloudflare Worker package, where the Next.js consumer could not import it.
  *
- * **[RELAY-33] is the ticket that fixes this** by extracting the validator to a shared
- * package. Its acceptance criteria already require "a test proves both paths import the
- * SAME function — not two copies". When it lands, the fix here is ONE line: change the
- * import in `lib/relay/forward.ts` from this module to the shared package. The type and
- * signature below are matched to `validateDestination(raw: string): SsrfCheck` in
- * `apps/proxy/src/services/ssrf.ts` on purpose so nothing else has to change.
+ * So the destination was validated at INGEST time and not at FORWARD time, and the window
+ * that left open was precisely the one an attacker wants: edit a route's destination to an
+ * internal address after a payload is queued but before it is delivered. Every DLQ replay
+ * had the same shape, because a replay starts from a stored envelope.
  *
- * WHAT THIS MEANS OPERATIONALLY UNTIL THEN:
+ * The original author deliberately did NOT copy the validator here — two copies of
+ * security-critical logic drift silently and both then look correct — and shaped this
+ * module's signature to match the real one so the fix would be an import swap. It was.
  *
- *   - The destination IS validated at ingestion time by the proxy, which does run the
- *     real validator. So a route pointing at 169.254.169.254 is rejected before anything
- *     is ever queued.
- *   - It is NOT re-validated here, at forward time. The window this leaves open is a
- *     destination edited to an internal address AFTER a payload was queued but BEFORE it
- *     is delivered — plus every DLQ replay, which starts from a stored envelope.
- *   - The check below is shape-only (`DestinationUrlSchema`: absolute http(s) URL). It
- *     stops a `file://` or `gopher://` destination and nothing else. It is not the
- *     control; it is the seam the control plugs into.
+ * ─── WHAT IT IS NOW ──────────────────────────────────────────────────────────────────
+ *
+ * The implementation lives in `packages/types/src/ssrf.ts`, which was ALREADY a dependency
+ * of both apps, so nothing was installed (RELAY-62 forbids `pnpm add`). This is a
+ * re-export, not a wrapper: the function identity is preserved, so the ingest path and the
+ * forward path hold the same function object — asserted by reference equality in
+ * `apps/proxy/test/ssrf.test.ts`.
+ *
+ * Callers: `lib/relay/forward.ts` and `pages/api/teams/[slug]/relay/dlq/[id]/retry.ts`.
+ * Neither needed an edit, which is why the filename is still `ssrfGap.ts` — renaming it
+ * would touch `retry.ts`, a file another agent is concurrently wrapping in `withTeamScope`
+ * (RELAY-84), and a rename collision on a security fix is not a trade worth making. The
+ * rename is a follow-up, and it is cosmetic: the control is live either way.
+ *
+ * ─── STILL OPEN, NAMED RATHER THAN PAPERED OVER ──────────────────────────────────────
+ *
+ * This is a LITERAL-ADDRESS validator. It does not resolve DNS, so a hostname that
+ * resolves to 169.254.169.254 still passes — RELAY-33's "DNS resolved on our side and the
+ * RESOLVED address re-checked" is NOT closed by this change. Cloudflare Workers cannot
+ * resolve DNS directly (no `dns` module, no raw socket); it needs a DNS-over-HTTPS lookup
+ * plus re-validation of every resolved A/AAAA record, and a TOCTOU gap remains even then.
+ * `forward.ts` sets `redirect: 'manual'`, which closes the redirect-chain half of the same
+ * problem, and that is the reason it must stay.
  */
-
-/** Mirrors `SsrfCheck` in `apps/proxy/src/services/ssrf.ts` — errors as values, not throws. */
-export type SsrfCheck =
-  | { ok: true; url: URL }
-  | { ok: false; reason: string; code: SsrfReason };
-
-/** Mirrors `SsrfReason` in `apps/proxy/src/services/ssrf.ts`. */
-export type SsrfReason =
-  | 'invalid_url'
-  | 'bad_scheme'
-  | 'embedded_credentials'
-  | 'blocked_host'
-  | 'blocked_ip'
-  | 'bad_port';
-
-/**
- * Shape-only stand-in for the real validator. See the gap notice above before relying on
- * this for anything.
- */
-export function validateDestination(raw: string): SsrfCheck {
-  const parsed = DestinationUrlSchema.safeParse(raw);
-  if (!parsed.success) {
-    return {
-      ok: false,
-      reason: 'destination is not an absolute http(s) URL',
-      code: 'bad_scheme',
-    };
-  }
-
-  try {
-    return { ok: true, url: new URL(parsed.data) };
-  } catch {
-    return {
-      ok: false,
-      reason: 'destination is not a parseable URL',
-      code: 'invalid_url',
-    };
-  }
-}
+export {
+  validateDestination,
+  isBlockedIPv4,
+  isBlockedIPv6,
+  type SsrfCheck,
+  type SsrfReason,
+} from '@coreframe-relay/types';

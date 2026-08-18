@@ -24,6 +24,29 @@ import type { NextApiRequest } from 'next';
 const digest = (value: string): Buffer =>
   createHash('sha256').update(value, 'utf8').digest();
 
+/**
+ * Constant-time, length-independent secret comparison. Exported for [RELAY-72].
+ *
+ * `qstash-test.ts` carried its own compare that opened with
+ * `if (a.length === 0 || b.length === 0 || a.length !== b.length) return false;` —
+ * an early return on a length mismatch, which is exactly the length oracle the digest
+ * step exists to remove. An attacker who can time the endpoint learns the secret's
+ * length for free, and 32 vs 48 characters is a meaningful cut of the search space.
+ *
+ * Both sides are hashed to a fixed 32 bytes first, so the comparison runs the same
+ * number of operations regardless of either input's length, and `timingSafeEqual`
+ * cannot throw on mismatched buffer lengths.
+ *
+ * Fails closed on an empty expected value: an unset secret must never match.
+ */
+export function timingSafeEqualSecrets(
+  presented: string,
+  expected: string
+): boolean {
+  if (!expected) return false;
+  return timingSafeEqual(digest(presented), digest(expected));
+}
+
 /** Extracts the token from `Authorization: Bearer <token>`; '' when absent or malformed. */
 const bearerToken = (header: string | undefined): string => {
   if (!header) return '';

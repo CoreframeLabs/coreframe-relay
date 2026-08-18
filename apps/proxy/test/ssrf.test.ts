@@ -210,3 +210,42 @@ describe('KNOWN GAP — DNS rebinding is NOT covered by this layer', () => {
     expect(true).toBe(true);
   });
 });
+
+// ─── [RELAY-33] Both paths run the SAME validator, not two copies ────────────────────
+
+/**
+ * RELAY-33's acceptance criterion is "a test proves both paths import the SAME function —
+ * not two copies", and the reason it is worded that way is that a behavioural test cannot
+ * tell the difference. Two copies of this file would pass every assertion above on the day
+ * they were written and then drift, and both copies would still look correct.
+ *
+ * So this asserts IDENTITY, not behaviour. `packages/types/src/ssrf.ts` holds the
+ * implementation; `apps/proxy/src/services/ssrf.ts` (ingest path) and
+ * `apps/dashboard/lib/relay/ssrfGap.ts` (forward path + DLQ retry) are both re-export
+ * seams, and `export { x } from '…'` preserves the function object. If anyone ever
+ * replaces a seam with a wrapper or a copy, these three assertions fail.
+ */
+describe('[RELAY-33] one validator, three import sites', () => {
+  it('proxy ingest path and the shared package hold the same function object', async () => {
+    const shared = await import('@coreframe-relay/types');
+    const proxyPath = await import('../src/services/ssrf');
+    expect(proxyPath.validateDestination).toBe(shared.validateDestination);
+  });
+
+  it('dashboard forward path and the shared package hold the same function object', async () => {
+    const shared = await import('@coreframe-relay/types');
+    // The forward path (`lib/relay/forward.ts`) and the DLQ retry
+    // (`pages/api/teams/[slug]/relay/dlq/[id]/retry.ts`) both import from this module.
+    const forwardPath = await import('../../dashboard/lib/relay/ssrfGap');
+    expect(forwardPath.validateDestination).toBe(shared.validateDestination);
+  });
+
+  it('the forward path now BLOCKS the metadata address it used to allow', () => {
+    // The regression that matters. Before RELAY-33 this module was a Zod shape check and
+    // this exact URL returned { ok: true } on the forward path, because it is a
+    // syntactically valid absolute http URL.
+    const r = validateDestination('http://169.254.169.254/latest/meta-data/');
+    expect(r.ok).toBe(false);
+    if (!r.ok) expect(r.code).toBe('blocked_ip');
+  });
+});
