@@ -58,7 +58,7 @@ const HeroSection = () => (
         {/* CTAs stack full-width at 360px (contract §5). */}
         <div className="mt-9 flex flex-col items-stretch justify-center gap-3 sm:flex-row sm:items-center">
           <LandingLink href="/auth/join">Request Founding Access</LandingLink>
-          <LandingLink href="mailto:umar.ali@coreframe-labs.dev" variant="secondary">
+          <LandingLink href="mailto:info@coreframe-labs.dev" variant="secondary">
             Talk to us before you connect anything
           </LandingLink>
         </div>

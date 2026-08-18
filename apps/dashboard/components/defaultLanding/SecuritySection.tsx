@@ -20,7 +20,7 @@
  *     failure is a repo-admin console setting this repo checkout cannot verify, so the
  *     claim is narrowed to what the workflow file itself proves: each job runs on every
  *     push/PR and fails the build on a CRITICAL/HIGH finding.
- *  2. The old copy said "Report to security@ or umar.ali@coreframe-labs.dev". A repo-wide
+ *  2. The old copy said "Report to security@ or info@coreframe-labs.dev". A repo-wide
  *     search found `security@...` written nowhere else — not in `SECURITY.md`, not in any
  *     env var, not in any DNS/email-routing note — only on this landing page. `SECURITY.md`
  *     itself names exactly one address. Claiming a mailbox nobody has provisioned is the
@@ -58,7 +58,7 @@ const capabilities = [
   },
   {
     title: 'Public vulnerability disclosure',
-    body: 'A published policy with stated response SLAs — 24 hours for anything that could touch another team’s data. Report to umar.ali@coreframe-labs.dev; safe-harbor terms apply to good-faith testing.',
+    body: 'A published policy with stated response SLAs — 24 hours for anything that could touch another team’s data. Report to info@coreframe-labs.dev; safe-harbor terms apply to good-faith testing.',
   },
 ];
 

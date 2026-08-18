@@ -175,7 +175,7 @@ const FoundingAccessSection = () => (
     <div className="relay-reveal mt-10 rounded-2xl border border-[#24262c] bg-[#191b20]/60 p-6 text-center sm:p-10">
       <div className="mx-auto flex max-w-md flex-col items-stretch justify-center gap-3 sm:flex-row sm:items-center">
         <LandingLink href="/auth/join">Request Founding Access</LandingLink>
-        <LandingLink href="mailto:umar.ali@coreframe-labs.dev" variant="secondary">
+        <LandingLink href="mailto:info@coreframe-labs.dev" variant="secondary">
           Talk to us before you connect anything
         </LandingLink>
       </div>
