@@ -6,6 +6,7 @@ import { createRoute, fetchRoutes, relayUrlFor } from 'models/route';
 import { recordAuditEvent } from '@/lib/audit';
 import { recordMetric } from '@/lib/metrics';
 import { validateWithSchema } from '@/lib/zod';
+import { withTeamScope } from '@/lib/db/scope';
 import { DestinationUrlSchema } from '@coreframe-relay/types';
 
 /**
@@ -30,23 +31,34 @@ const createRouteSchema = z.object({
   destinationHeaders: z.record(z.string(), z.string()).optional(),
 });
 
-export default async function handler(req: NextApiRequest, res: NextApiResponse) {
+export default async function handler(
+  req: NextApiRequest,
+  res: NextApiResponse
+) {
   try {
-    await throwIfNoTeamAccess(req, res);
+    const teamMember = await throwIfNoTeamAccess(req, res);
 
-    switch (req.method) {
-      case 'GET':
-        await handleGET(req, res);
-        break;
-      case 'POST':
-        await handlePOST(req, res);
-        break;
-      default:
-        res.setHeader('Allow', 'GET, POST');
-        res.status(405).json({
-          error: { message: `Method ${req.method} Not Allowed` },
-        });
-    }
+    // [RELAY-84] Every query below must run inside the RLS team scope. Once
+    // `DATABASE_URL` points at `relay_app` (rolbypassrls=f), an unscoped read of
+    // `Route` returns ZERO ROWS rather than an error — the routes page would show
+    // "no routes" instead of failing — and an unscoped INSERT is refused outright
+    // by the policy's WITH CHECK. The id comes from the membership
+    // `throwIfNoTeamAccess` just verified, never from the request.
+    await withTeamScope(teamMember.teamId, async () => {
+      switch (req.method) {
+        case 'GET':
+          await handleGET(req, res);
+          break;
+        case 'POST':
+          await handlePOST(req, res);
+          break;
+        default:
+          res.setHeader('Allow', 'GET, POST');
+          res.status(405).json({
+            error: { message: `Method ${req.method} Not Allowed` },
+          });
+      }
+    });
   } catch (error: any) {
     const message = error.message || 'Something went wrong';
     const status = error.status || 500;
@@ -84,7 +96,8 @@ const handlePOST = async (req: NextApiRequest, res: NextApiResponse) => {
   // is an update-level permission, not a read.
   throwIfNotAllowed(user, 'team', 'update');
 
-  const { name, destination, maxRetries, destinationHeaders } = validateWithSchema(createRouteSchema, req.body);
+  const { name, destination, maxRetries, destinationHeaders } =
+    validateWithSchema(createRouteSchema, req.body);
 
   const route = await createRoute({
     teamId: user.team.id,
@@ -101,7 +114,11 @@ const handlePOST = async (req: NextApiRequest, res: NextApiResponse) => {
     target: route.id,
     // Destination is recorded deliberately: "where did our webhooks start going, and who
     // pointed them there" is the question an audit trail exists to answer.
-    metadata: { name: route.name, slug: route.slug, destination: route.destination },
+    metadata: {
+      name: route.name,
+      slug: route.slug,
+      destination: route.destination,
+    },
   });
 
   recordMetric('route.created');

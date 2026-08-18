@@ -1,13 +1,11 @@
 import type { NextApiRequest, NextApiResponse } from 'next';
 import { z } from 'zod';
 
-import {
-  fetchTeamDeliveryFeed,
-  DELIVERY_FEED_MAX_ROWS,
-} from 'models/delivery';
+import { fetchTeamDeliveryFeed, DELIVERY_FEED_MAX_ROWS } from 'models/delivery';
 import { getCurrentUserWithTeam, throwIfNoTeamAccess } from 'models/team';
 import { throwIfNotAllowed } from 'models/user';
 import { validateWithSchema } from '@/lib/zod';
+import { withTeamScope } from '@/lib/db/scope';
 
 const querySchema = z.object({
   slug: z.string(),
@@ -36,19 +34,29 @@ export default async function handler(
       return res.status(405).json({ error: { message: 'Method Not Allowed' } });
     }
 
-    await throwIfNoTeamAccess(req, res);
-    const user = await getCurrentUserWithTeam(req, res);
-    throwIfNotAllowed(user, 'team', 'read');
+    const teamMember = await throwIfNoTeamAccess(req, res);
 
-    const query = validateWithSchema(querySchema, req.query);
-    const take = Math.min(
-      Math.max(Number(query.take ?? 25) || 25, 1),
-      DELIVERY_FEED_MAX_ROWS
-    );
-    const filter = query.routeId ? { routeId: query.routeId } : {};
+    // [RELAY-84] `fetchTeamDeliveryFeed` reads `DeliveryLog`, whose policy is
+    // `EXISTS (SELECT 1 FROM "Route" r WHERE r.id = "routeId" AND r."teamId" =
+    // current_setting('app.current_team_id', true))`. Unscoped that predicate is
+    // never true, so under `relay_app` this endpoint answers `{ data: [] }` with a
+    // 200 — the "Send test webhook" button would wait forever for a row that is
+    // there. The scope id comes from the verified membership, never from the slug.
+    await withTeamScope(teamMember.teamId, async () => {
+      const user = await getCurrentUserWithTeam(req, res);
+      throwIfNotAllowed(user, 'team', 'read');
 
-    const rows = await fetchTeamDeliveryFeed(user.team.id, filter, take);
-    return res.status(200).json({ data: rows });
+      const query = validateWithSchema(querySchema, req.query);
+      const take = Math.min(
+        Math.max(Number(query.take ?? 25) || 25, 1),
+        DELIVERY_FEED_MAX_ROWS
+      );
+      const filter = query.routeId ? { routeId: query.routeId } : {};
+
+      const rows = await fetchTeamDeliveryFeed(user.team.id, filter, take);
+      res.status(200).json({ data: rows });
+    });
+    return;
   } catch (error: any) {
     const message = error.message || 'Something went wrong';
     const status = error.status || 500;
