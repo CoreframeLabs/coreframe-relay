@@ -1,6 +1,6 @@
 import { z } from 'zod';
 
-import { IngestTokenSchema, RouteStatusSchema } from './route';
+import { RouteStatusSchema } from './route';
 
 /**
  * The proxy ↔ dashboard internal contract.
@@ -24,10 +24,12 @@ import { IngestTokenSchema, RouteStatusSchema } from './route';
  *   404 → { error: 'not_found' }        — no such team/route, or route is ARCHIVED
  *   401 → { error: 'unauthorized' }     — bad or missing bearer secret
  *
- * [RELAY-57] note: the 200 body now carries `ingestToken`. This endpoint answers BEFORE
- * the proxy has validated the path credential, so the response must never write the
- * token to a log line, and the dashboard's own logger must redact it. The failure
- * bodies stay fixed strings for the same reason they were at RELAY-5.
+ * [RELAY-71] note: the 200 body carries `ingestTokenSha256`, NOT the token. This endpoint
+ * is authenticated by one global secret and accepts arbitrary slugs, so any credential in
+ * its response is a credential that one leaked secret reads for every tenant. It answers
+ * BEFORE the proxy has validated the path credential, which is precisely why nothing in
+ * the response may be usable as one. The failure bodies stay fixed strings for the same
+ * reason they were at RELAY-5.
 
  * The 401 and 404 bodies are fixed strings on purpose. An internal endpoint that says
  * "team exists but route does not" is a tenant-enumeration oracle for anyone who gets
@@ -49,17 +51,38 @@ export const RouteLookupResponseSchema = z.object({
   maxRetries: z.number().int().min(1).max(10),
   status: RouteStatusSchema,
   /**
-   * [RELAY-57] The per-route ingest token. COMPARED PROXY-SIDE: this contract sends it
-   * to the proxy and `routes/ingest.ts` runs RELAY-4's digest compare against the path
-   * credential. Dashboard-side comparison was the alternative and was rejected — it
-   * would require the proxy to FORWARD the raw token to an internal endpoint, which is
-   * exactly the "credential on the wire and in a log line" failure mode this field
-   * exists to close.
+   * [RELAY-71] SHA-256 of the per-route ingest token, lower-case hex. NOT the token.
    *
-   * This is the one place the token legitimately crosses a process boundary, and it is
-   * only ever secret-to-secret, TLS-only, Bearer-authenticated, scope-of-the-route.
+   * This field used to be the raw `ingestToken`, defended as "the one place the token
+   * legitimately crosses a process boundary — secret-to-secret, TLS-only,
+   * Bearer-authenticated, scope-of-the-route". Three of those four are true. The fourth
+   * is not: the lookup endpoint is authenticated by ONE GLOBAL `RELAY_API_SECRET` and
+   * accepts ARBITRARY `teamSlug`/`routeSlug`, so a single leaked secret read every
+   * tenant's live ingest credential — the exact shared-secret failure `Route.ingestToken`
+   * was introduced to remove, reappearing one layer down.
+   *
+   * Sending the digest instead removes the credential from the response entirely while
+   * keeping every property the proxy needs:
+   *
+   *  - The proxy still compares LOCALLY, so the raw token is never forwarded to an
+   *    internal endpoint and never appears in a dashboard log line. The alternative —
+   *    dashboard-side comparison — was rejected at RELAY-57 for exactly that reason, and
+   *    it stays rejected.
+   *  - The comparison is unchanged in strength: `timingSafeEqualStrings` already hashed
+   *    both sides to SHA-256 before comparing, so the proxy now hashes the PRESENTED
+   *    token and compares digests. Same operation, one less secret on the wire.
+   *  - The KV route cache keeps working. A per-request verification call to the dashboard
+   *    would have removed the cache and put a synchronous cross-cloud hop on the hot
+   *    ingest path.
+   *
+   * Tokens are 24 random bytes (192-bit) per `generateIngestToken()`, so the digest is not
+   * a meaningful attack surface: there is nothing to brute-force back. What a leaked
+   * `RELAY_API_SECRET` still exposes is tenant METADATA (destination, status, ids) for any
+   * slug pair — real, and tracked, but no longer a credential handout.
    */
-  ingestToken: IngestTokenSchema,
+  ingestTokenSha256: z
+    .string()
+    .regex(/^[0-9a-f]{64}$/, 'lower-case hex SHA-256 digest'),
 });
 export type RouteLookupResponse = z.infer<typeof RouteLookupResponseSchema>;
 

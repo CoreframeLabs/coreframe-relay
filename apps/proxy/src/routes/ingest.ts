@@ -6,20 +6,22 @@ import {
   type RelayEnvelope,
 } from '@coreframe-relay/types';
 
-import { timingSafeEqualStrings, verifyRelayKey } from '../middleware/relayKey.js';
+import { checkRateLimit } from '../middleware/rateLimit.js';
+import { sha256Hex, timingSafeEqualStrings } from '../middleware/relayKey.js';
 import { lookupRoute } from '../services/routeLookup.js';
 import { publishToQStash } from '../services/qstash.js';
 import { validateDestination } from '../services/ssrf.js';
 import type { AppEnv } from '../types/bindings.js';
 
 /**
- * POST /in/:teamSlug/:routeSlug — legacy path, `X-Relay-Key` required — [RELAY-4].
- * POST /in/:teamSlug/:routeSlug/:ingestToken — path credential, no header — [RELAY-57].
+ * POST /in/:teamSlug/:routeSlug/:ingestToken — path credential — [RELAY-57], [RELAY-71].
  *
- * Both are the same handler; the `ingestToken` path segment is optional. Auth is decided
- * per-request: a valid path token OR a valid `X-Relay-Key` satisfies it, which is what
- * "keep `X-Relay-Key` during the migration" means. Rotation revokes the old token
- * without touching the shared header.
+ * The per-route ingest token is the ONLY credential this endpoint accepts. The legacy
+ * two-segment `X-Relay-Key` form was retired by [RELAY-71]: it authenticated ingestion
+ * against ANY tenant's route with one global shared secret. The route registration still
+ * matches the two-segment form so that a sender using the old URL gets the same opaque
+ * 404 as any other unauthenticated caller, rather than a 404-from-routing that behaves
+ * differently under load or in logs.
  *
  * The product promise is a sub-10ms acknowledgement, and the shape of this handler is
  * that promise: authenticate, look the route up, validate its destination, queue the
@@ -222,52 +224,48 @@ export const ingest = new Hono<AppEnv>()
     const route = lookup.route;
 
     /**
-     * [RELAY-57] Authentication, per request, in the arms the decision specified.
+     * [RELAY-57] Authentication. [RELAY-71] retired the second arm.
      *
-     * Order matters deliberately.
+     * THE PATH TOKEN IS NOW THE ONLY INGEST CREDENTIAL. The legacy `X-Relay-Key` branch
+     * accepted the global `RELAY_API_SECRET` on this PUBLIC endpoint, which meant one
+     * shared secret authorised ingestion into every tenant's route — precisely the
+     * failure `Route.ingestToken` was introduced to remove, still live on a second arm.
+     * It is deleted rather than deprecated: `relayUrlFor()` has been handing users the
+     * token URL since RELAY-57, so there is nothing left to migrate, and a fallback
+     * credential that nobody needs is a credential nobody rotates.
      *
-     *  1. If a path token was presented and a header was presented too, the header is
-     *     IGNORED: a request that can carry a URL credential carries no second one to
-     *     audit. Two valid credentials on one request is a misconfigured sender, and
-     *     answering based on whichever is checked first is a policy no one wrote down.
-     *  2. A presented path token is constant-time compared (SHA-256 digests,
-     *     `timingSafeEqualStrings`, RELAY-4). No early exit; the compare runs whether or
-     *     not the header is also valid.
-     *  3. Only when NO path token was presented does the legacy `X-Relay-Key` header run,
-     *     and it runs unchanged: same shared secret, same 401 shape, same timing.
+     * `verifyRelayKey` itself is NOT deleted — it still authenticates non-ingest proxy
+     * routes, where a single operator-held secret is the correct model. What changed is
+     * that it no longer stands in front of tenant data.
+     *
+     * The compare: the lookup response now carries `ingestTokenSha256`, not the token
+     * ([RELAY-71]), so the PRESENTED token is hashed and the digests are compared with
+     * `timingSafeEqualStrings`. That function hashed both sides internally anyway, so the
+     * strength is identical — there is simply one less live credential on the wire and in
+     * the KV cache.
      *
      * Failure is 404, never 401. A 401 tells a brute-forcer "the route EXISTS, come back
-     * with a better token"; a 404 tells them nothing. That asymmetry is the entire
-     * reason ingest-token auth lives here instead of in the `relayKey` middleware, which
-     * answers 401 and must not change during the migration.
+     * with a better token"; a 404 tells them nothing. A request with no token at all gets
+     * the same 404 as a wrong one, so the two arms are indistinguishable.
      */
-    if (presentedToken !== undefined) {
-      // A path-credentialed request never consults the header. The shared secret is not
-      // a fallback here — the token IS the credential.
-      const presentedValid =
-        IngestTokenSchema.safeParse(presentedToken).success &&
-        (await timingSafeEqualStrings(presentedToken, route.ingestToken));
+    if (presentedToken === undefined) {
+      log('proxy.ingest.no_token', { requestId, routeId: route.routeId });
+      return c.json({ error: 'not found', requestId }, 404);
+    }
 
-      if (!presentedValid) {
-        // One log line, never the token, never the presented segment. The routeId is
-        // present: the lookup already returned it and an internal log line is what an
-        // operator reaches for when a customer says "I rotated the token and it broke".
-        log('proxy.ingest.invalid_token', { requestId, routeId: route.routeId });
-        return c.json({ error: 'not found', requestId }, 404);
-      }
-    } else {
-      // ── Legacy path: X-Relay-Key, exactly as RELAY-4 specified it. ────────────
-      // This is the same middleware logic, inline rather than mounted, because the
-      // middleware cannot know which of the two arms the request arrived by. When the
-      // migration window ends, delete this branch and the route `.post()` above keeps
-      // working unchanged.
-      const auth = await verifyRelayKey(c.env, c.req.raw);
-      if (!auth.ok) {
-        if (auth.code === 'misconfigured') {
-          return c.json({ error: 'proxy not configured', requestId }, 503);
-        }
-        return c.json({ error: 'unauthorized', requestId }, 401);
-      }
+    const presentedValid =
+      IngestTokenSchema.safeParse(presentedToken).success &&
+      (await timingSafeEqualStrings(
+        await sha256Hex(presentedToken),
+        route.ingestTokenSha256
+      ));
+
+    if (!presentedValid) {
+      // One log line, never the token, never the presented segment. The routeId is
+      // present: the lookup already returned it and an internal log line is what an
+      // operator reaches for when a customer says "I rotated the token and it broke".
+      log('proxy.ingest.invalid_token', { requestId, routeId: route.routeId });
+      return c.json({ error: 'not found', requestId }, 404);
     }
 
     /**
@@ -282,6 +280,55 @@ export const ingest = new Hono<AppEnv>()
     if (route.status !== 'ACTIVE' && route.status !== 'FAILING') {
       log('proxy.ingest.route_not_accepting', { requestId, routeId: route.routeId, status: route.status });
       return c.json({ error: 'not found', requestId }, 404);
+    }
+
+    /**
+     * [RELAY-13] Per-team rate limit.
+     *
+     * Position is the security property here, and it is bracketed on both sides:
+     *
+     *   - It runs AFTER the token check. A limiter in front of authentication lets anyone
+     *     who guesses a `teamSlug`/`routeSlug` pair — both of which are semi-public, they
+     *     are in the URL a customer pastes into Stripe — burn that team's whole budget
+     *     with garbage tokens and take their webhooks offline. That turns the control
+     *     into a DoS amplifier pointed at the customer it protects.
+     *   - It runs BEFORE `readBodyWithLimit`. Throttling after a megabyte has been
+     *     buffered has already spent the resource the limit exists to protect.
+     *
+     * Keyed on `route.teamId` — never an IP. Cloudflare rotates client addresses, so an
+     * IP key throttles one legitimate sender's egress pool while an attacker on
+     * residential proxies never lands in the same bucket twice.
+     *
+     * 429 carries `Retry-After`, which is the half of the answer that makes it actionable:
+     * Stripe, GitHub and Shopify all honour it, so a throttled webhook becomes a delayed
+     * delivery rather than a lost one.
+     */
+    const limit = await checkRateLimit(c.env, route.teamId);
+    if (!limit.ok) {
+      if (limit.code === 'not_configured') {
+        // Deployed with no limiter bound. Refusing is the point: a control that quietly
+        // does nothing when its binding is absent cannot be told from a working one.
+        console.error(
+          JSON.stringify({
+            level: 'error',
+            event: 'proxy.misconfigured',
+            requestId,
+            reason: 'RELAY_RATE_LIMITER is not bound',
+          })
+        );
+        return c.json({ error: 'proxy not configured', requestId }, 503);
+      }
+
+      log('proxy.ingest.rate_limited', {
+        requestId,
+        routeId: route.routeId,
+        teamId: route.teamId,
+      });
+      return c.json(
+        { error: 'too many requests', requestId },
+        429,
+        { 'retry-after': String(limit.retryAfterSeconds) }
+      );
     }
 
     /**

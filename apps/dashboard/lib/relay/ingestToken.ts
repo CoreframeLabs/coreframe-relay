@@ -32,3 +32,20 @@ export function ingestTokenMatches(presented: string, expected: string): boolean
     createHash('sha256').update(v, 'utf8').digest();
   return timingSafeEqual(digest(presented), digest(expected));
 }
+
+/**
+ * SHA-256 of a token as lower-case hex — [RELAY-71].
+ *
+ * The internal route-lookup contract sends this to the proxy INSTEAD of the raw token.
+ * That endpoint is authenticated by one global `RELAY_API_SECRET` and accepts arbitrary
+ * `teamSlug`/`routeSlug`, so a single leaked secret used to read every tenant's live
+ * ingest credential. It now reads a digest, which is not usable to ingest anything.
+ *
+ * Nothing is weakened by the substitution: the proxy's compare already hashed both sides
+ * to SHA-256 before comparing, so it now hashes the presented token and compares digests —
+ * the same operation with one less secret on the wire. Tokens carry 192 bits of entropy,
+ * so the digest cannot be walked back to the token.
+ */
+export function ingestTokenDigestHex(token: string): string {
+  return createHash('sha256').update(token, 'utf8').digest('hex');
+}

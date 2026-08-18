@@ -2,6 +2,7 @@ import type { NextApiRequest, NextApiResponse } from 'next';
 import { z } from 'zod';
 
 import { isAuthorizedInternalRequest } from '@/lib/relay/internalAuth';
+import { ingestTokenDigestHex } from '@/lib/relay/ingestToken';
 import { fetchRouteBySlugs } from 'models/route';
 import { RouteLookupResponseSchema } from '@coreframe-relay/types/internal';
 
@@ -85,11 +86,13 @@ export default async function handler(
       destination: route.destination,
       maxRetries: route.maxRetries,
       status: route.status,
-      // [RELAY-57] sent so the proxy can constant-time compare the caller's path
-      // credential. This is the ONE place the token crosses a process boundary:
-      // secret-to-secret, TLS-only, Bearer-authenticated, and never logged. Zod keeps
-      // the shape honest, so a future column still cannot leak here.
-      ingestToken: route.ingestToken,
+      // [RELAY-71] The DIGEST, never the token. This endpoint is authenticated by one
+      // global RELAY_API_SECRET and accepts arbitrary slugs, so anything credential-shaped
+      // in this response is a credential that ONE leaked secret reads for EVERY tenant —
+      // the shared-secret failure Route.ingestToken exists to remove, reappearing a layer
+      // down. The proxy's compare already hashed both sides to SHA-256, so it hashes the
+      // presented token and compares digests: same strength, one less secret on the wire.
+      ingestTokenSha256: ingestTokenDigestHex(route.ingestToken),
     });
 
     // Caching is the proxy's business (ROUTE_LOOKUP_CACHE_TTL_SECONDS), but this response

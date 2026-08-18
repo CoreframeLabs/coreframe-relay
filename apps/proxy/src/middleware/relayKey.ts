@@ -39,6 +39,24 @@ export async function timingSafeEqualStrings(a: string, b: string): Promise<bool
 }
 
 /**
+ * SHA-256 of a value as lower-case hex — [RELAY-71].
+ *
+ * The route-lookup contract now carries `ingestTokenSha256` rather than the raw token, so
+ * the proxy hashes the PRESENTED path credential and compares digests. This is the same
+ * operation `timingSafeEqualStrings` was already performing internally; it is exposed here
+ * because one side of the comparison now arrives pre-hashed.
+ */
+export async function sha256Hex(value: string): Promise<string> {
+  const digest = await crypto.subtle.digest(
+    'SHA-256',
+    new TextEncoder().encode(value)
+  );
+  return Array.from(new Uint8Array(digest))
+    .map((b) => b.toString(16).padStart(2, '0'))
+    .join('');
+}
+
+/**
  * The pure check, extracted for [RELAY-57] so the ingestion route can run it inline
  * only on the header-credentialed path. A path-token request never reaches this.
  *

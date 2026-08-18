@@ -1,3 +1,5 @@
+import type { RateLimiterBinding } from '../middleware/rateLimit.js';
+
 /**
  * Cloudflare Workers environment bindings.
  *
@@ -27,8 +29,22 @@ export type Bindings = {
    * only — deployed envs never have this binding.
    */
   RELAY_LOCAL_QUEUE_URL?: string;
-  /** Idempotency keys and rate-limit counters ([RELAY-4]). */
+  /** Idempotency keys and the route-lookup cache ([RELAY-4]). Still unbound — see below. */
   RELAY_KV?: KVNamespace;
+  /**
+   * [RELAY-13] Per-team ingestion rate limiter — the Workers Rate Limiting binding,
+   * declared in `wrangler.toml` under `[[unsafe.bindings]]`.
+   *
+   * NOT KV, on purpose. `RELAY_KV` has never been bound (its `wrangler.toml` block is
+   * commented out pending an issued namespace id), so a KV-backed limiter would be inert
+   * on the deployed Worker while looking complete in the source. This binding needs no
+   * issued id and is enforced by the runtime. Full reasoning in `middleware/rateLimit.ts`.
+   *
+   * Optional in the type for the same reason every other secret is: the Worker must boot
+   * and answer /health when it is missing. It is NOT optional in behaviour — a deployed
+   * environment without it refuses ingestion with 503 rather than failing open.
+   */
+  RELAY_RATE_LIMITER?: RateLimiterBinding;
   /**
    * [RELAY-67] Dashboard health endpoint the daily Cron Trigger pings to keep the
    * hosted Supabase project busy enough that Supabase Free's 7-day no-activity pause

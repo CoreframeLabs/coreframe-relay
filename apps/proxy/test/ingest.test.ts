@@ -1,7 +1,10 @@
+import { createHash } from 'node:crypto';
+
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { RelayEnvelopeSchema } from '@coreframe-relay/types';
 
 import app from '../src/index.js';
+import { RATE_LIMIT_WINDOW_SECONDS } from '../src/middleware/rateLimit.js';
 import { RELAY_KEY_HEADER, timingSafeEqualStrings } from '../src/middleware/relayKey.js';
 import { MAX_BODY_BYTES } from '../src/routes/ingest.js';
 
@@ -20,12 +23,41 @@ const TEAM_ID = '3f2504e0-4f89-41d3-9a0c-0305e82c3303';
 // 32 URL-safe base64url chars — the shape `generateIngestToken()` produces.
 const INGEST_TOKEN = '0'.repeat(32);
 
+/**
+ * [RELAY-71] The lookup contract carries the token's SHA-256, not the token. Computed
+ * here rather than hard-coded so the fixture cannot silently disagree with the dashboard's
+ * `ingestTokenDigestHex`, which is the same operation.
+ */
+const sha256HexOf = (v: string) =>
+  createHash('sha256').update(v, 'utf8').digest('hex');
+
+/**
+ * [RELAY-13] A rate-limiter double standing in for the Workers Rate Limiting binding.
+ *
+ * `baseEnv` carries an ALWAYS-ALLOW limiter rather than omitting the binding, and that is
+ * deliberate: an unbound limiter is a 503 in every deployed environment, so leaving it out
+ * of the default env would make every unrelated test in this file assert against a
+ * misconfigured Worker instead of a working one.
+ */
+function fakeLimiter(opts: { allowFirst?: number } = {}) {
+  const allowFirst = opts.allowFirst ?? Number.POSITIVE_INFINITY;
+  const seen: string[] = [];
+  return {
+    seen,
+    limit: vi.fn(async ({ key }: { key: string }) => {
+      seen.push(key);
+      return { success: seen.filter((k) => k === key).length <= allowFirst };
+    }),
+  };
+}
+
 const baseEnv = {
   ENVIRONMENT: 'development' as const,
   RELAY_API_SECRET: SECRET,
   RELAY_DASHBOARD_URL: 'http://localhost:4002',
   UPSTASH_QSTASH_URL: 'https://qstash-eu-central-1.upstash.io',
   UPSTASH_QSTASH_TOKEN: 'qstash-token',
+  RELAY_RATE_LIMITER: fakeLimiter(),
 };
 
 const activeRoute = {
@@ -34,7 +66,9 @@ const activeRoute = {
   destination: 'https://api.example.com/hook',
   maxRetries: 5,
   status: 'ACTIVE' as const,
-  ingestToken: INGEST_TOKEN,
+  // [RELAY-71] The contract carries the DIGEST. A fixture that still carried the token
+  // would keep passing against a proxy that had regressed to reading one.
+  ingestTokenSha256: sha256HexOf(INGEST_TOKEN),
 };
 
 type FetchCall = { url: string; init: RequestInit | undefined };
@@ -66,13 +100,27 @@ function mockFetch(opts: {
 const lookupCalls = () => calls.filter((c) => c.url.includes('/route-lookup'));
 const publishCalls = () => calls.filter((c) => c.url.includes('/v2/publish/'));
 
-const post = (path: string, init: RequestInit = {}, env: Record<string, unknown> = baseEnv) =>
+/**
+ * POST an ingestion request the way a real sender does after [RELAY-71]: the per-route
+ * token in the URL, and NO `X-Relay-Key`.
+ *
+ * The helper appends the token so that every test below exercises the only credential the
+ * endpoint still accepts. It used to send `X-Relay-Key` on a two-segment path; that arm no
+ * longer authenticates anything, so a suite still built on it would have been asserting
+ * 404s for the rest of time.
+ */
+const post = (
+  path: string,
+  init: RequestInit = {},
+  env: Record<string, unknown> = baseEnv,
+  token: string = INGEST_TOKEN
+) =>
   app.request(
-    path,
+    `${path}/${token}`,
     {
       method: 'POST',
       ...init,
-      headers: { [RELAY_KEY_HEADER]: SECRET, 'content-type': 'application/json', ...(init.headers ?? {}) },
+      headers: { 'content-type': 'application/json', ...(init.headers ?? {}) },
       body: init.body ?? '{"id":"evt_1"}',
     },
     env
@@ -86,36 +134,103 @@ afterEach(() => {
   vi.unstubAllGlobals();
 });
 
-describe('X-Relay-Key authentication', () => {
-  it('rejects a request with no key — on the legacy two-segment path', async () => {
-    // Updated for [RELAY-57]: the header-first gate moved inside the handler, and a
-    // route lookup must happen before EITHER credential arm is reached — the path
-    // token belongs to the route row, and there is no route here to compare against.
-    mockFetch({ lookup: { status: 404, body: { error: 'not_found' } } });
-    const res = await app.request('/in/acme/stripe', { method: 'POST', body: '{}' }, baseEnv);
+/**
+ * [RELAY-71] — the critical this ticket closes.
+ *
+ * Two separate defects shared one root cause, and both are asserted here because either
+ * one alone reinstates the other's damage:
+ *
+ *   (1) `POST /in/:teamSlug/:routeSlug` accepted the GLOBAL `RELAY_API_SECRET` via
+ *       `X-Relay-Key` on a PUBLIC endpoint. One shared secret authorised ingestion into
+ *       every tenant's route — exactly the failure `Route.ingestToken` was introduced to
+ *       remove, still live on a second arm.
+ *   (2) The internal route-lookup contract shipped the raw `ingestToken` to the proxy.
+ *       That endpoint is authenticated by the same one global secret and accepts
+ *       arbitrary slugs, so a single leaked secret READ every tenant's live ingest
+ *       credential — the same failure one layer down.
+ *
+ * Fixing only (1) leaves a secret that hands out every token. Fixing only (2) leaves a
+ * secret that ingests into every route directly.
+ */
+describe('[RELAY-71] the global secret no longer authenticates ingestion', () => {
+  it('REFUSES a request bearing a VALID X-Relay-Key on the legacy two-segment path', async () => {
+    // The exact request that used to succeed. This is the assertion S1 re-runs.
+    mockFetch();
+    const res = await app.request(
+      '/in/acme/stripe',
+      { method: 'POST', body: '{}', headers: { [RELAY_KEY_HEADER]: SECRET } },
+      baseEnv
+    );
 
     expect(res.status).toBe(404);
-    expect(lookupCalls()).toHaveLength(1);
+    expect(await res.json()).toMatchObject({ error: 'not found' });
     expect(publishCalls()).toHaveLength(0);
   });
 
-  it('rejects a wrong key with the same body as a missing one', async () => {
+  it('REFUSES a valid X-Relay-Key presented alongside a WRONG path token', async () => {
+    // The header must not rescue a bad token. If it did, the retired arm would still be
+    // live — just harder to see.
     mockFetch();
-    const missing = await app.request('/in/acme/stripe', { method: 'POST', body: '{}' }, baseEnv);
-    const wrong = await post('/in/acme/stripe', { headers: { [RELAY_KEY_HEADER]: 'x'.repeat(48) } });
+    const res = await post(
+      '/in/acme/stripe',
+      { headers: { [RELAY_KEY_HEADER]: SECRET } },
+      baseEnv,
+      '1'.repeat(32)
+    );
 
-    expect(wrong.status).toBe(401);
-    expect(await wrong.json()).toMatchObject({ error: 'unauthorized' });
-    expect((await missing.json() as { error: string }).error).toBe('unauthorized');
+    expect(res.status).toBe(404);
+    expect(publishCalls()).toHaveLength(0);
   });
 
-  it('rejects a key that is a PREFIX of the real secret', async () => {
+  it('answers a missing credential and a valid global secret IDENTICALLY', async () => {
     mockFetch();
-    const res = await post('/in/acme/stripe', { headers: { [RELAY_KEY_HEADER]: SECRET.slice(0, -1) } });
-    expect(res.status).toBe(401);
+    const none = await app.request('/in/acme/stripe', { method: 'POST', body: '{}' }, baseEnv);
+    const withSecret = await app.request(
+      '/in/acme/stripe',
+      { method: 'POST', body: '{}', headers: { [RELAY_KEY_HEADER]: SECRET } },
+      baseEnv
+    );
+
+    expect(none.status).toBe(withSecret.status);
+    expect((await none.json() as { error: string }).error).toBe(
+      (await withSecret.json() as { error: string }).error
+    );
   });
 
-  it('refuses everything with 503 when no secret is configured — never fails open', async () => {
+  it('the lookup contract carries NO usable credential — only a digest', async () => {
+    // The second half of the finding. A response body that still contained the token
+    // would be rejected by the contract schema, so the proxy 503s rather than trusting it.
+    mockFetch({
+      lookup: {
+        status: 200,
+        body: {
+          routeId: ROUTE_ID,
+          teamId: TEAM_ID,
+          destination: 'https://api.example.com/hook',
+          maxRetries: 5,
+          status: 'ACTIVE',
+          ingestToken: INGEST_TOKEN,
+        },
+      },
+    });
+    const res = await post('/in/acme/stripe');
+
+    expect(res.status).toBe(503);
+    expect(publishCalls()).toHaveLength(0);
+  });
+
+  it('a digest is not a credential — presenting it as the token is refused', async () => {
+    // Anyone holding a leaked RELAY_API_SECRET can now read the digest. Proving the
+    // digest cannot be replayed as the token is what makes that a metadata leak rather
+    // than a credential handout.
+    mockFetch();
+    const res = await post('/in/acme/stripe', {}, baseEnv, sha256HexOf(INGEST_TOKEN));
+
+    expect(res.status).toBe(404);
+    expect(publishCalls()).toHaveLength(0);
+  });
+
+  it('still 503s — never 200 — when no secret is configured at all', async () => {
     mockFetch();
     const { RELAY_API_SECRET: _omitted, ...noSecret } = baseEnv;
     const res = await post('/in/acme/stripe', {}, noSecret);
@@ -502,11 +617,19 @@ describe('[RELAY-57] path ingest token', () => {
     expect(await malformed.json()).toMatchObject({ error: 'not found' });
   });
 
-  it('(c) still accepts the legacy X-Relay-Key header during the migration', async () => {
+  it('(c) [RELAY-71] the legacy X-Relay-Key arm is GONE, not merely deprecated', async () => {
+    // This assertion is inverted from the one RELAY-57 shipped. The migration window is
+    // closed: `relayUrlFor()` has handed users the token URL since RELAY-57, so there was
+    // nothing left to migrate, and a fallback credential nobody needs is one nobody
+    // rotates. Left here rather than deleted so the inversion is visible in the diff.
     mockFetch();
-    const res = await post('/in/acme/stripe');
-    expect(res.status).toBe(200);
-    expect(publishCalls()).toHaveLength(1);
+    const res = await app.request(
+      '/in/acme/stripe',
+      { method: 'POST', body: '{}', headers: { [RELAY_KEY_HEADER]: SECRET } },
+      baseEnv
+    );
+    expect(res.status).toBe(404);
+    expect(publishCalls()).toHaveLength(0);
   });
 
   it('(d) never logs the token, and never returns it in an error body', async () => {
@@ -556,24 +679,20 @@ describe('[RELAY-57] path ingest token', () => {
     const before = await app.request(`/in/acme/stripe/${token}`, { method: 'POST', body: '{}' }, env);
     expect(before.status).toBe(200);
 
-    // Rotate: the dashboard now answers the SAME lookup path with a new token.
+    // Rotate: the dashboard now answers the SAME lookup path with a new token's digest.
     mockFetch({
-      lookup: { status: 200, body: { ...activeRoute, ingestToken: 'z'.repeat(32) } },
+      lookup: { status: 200, body: { ...activeRoute, ingestTokenSha256: sha256HexOf('z'.repeat(32)) } },
     });
     const after = await app.request(`/in/acme/stripe/${token}`, { method: 'POST', body: '{}' }, env);
     expect(after.status).toBe(404);
-  });
 
-  it('(a+c) both arms work against the same route in one session', async () => {
-    mockFetch();
-    const byHeader = await post('/in/acme/stripe');
-    const byPath = await app.request(
-      `/in/acme/stripe/${token}`,
+    // And the NEW token works on the same URL shape — rotation revokes, it does not brick.
+    const rotated = await app.request(
+      `/in/acme/stripe/${'z'.repeat(32)}`,
       { method: 'POST', body: '{}' },
-      baseEnv
+      env
     );
-    expect(byHeader.status).toBe(200);
-    expect(byPath.status).toBe(200);
+    expect(rotated.status).toBe(200);
   });
 
   it('never forwards the path credential to the destination', async () => {
@@ -681,5 +800,248 @@ describe('[RELAY-73] smoke-test SSRF waiver', () => {
     });
     const res = await send('http://localhost:8787', localEnv);
     expect(res.status).toBe(502);
+  });
+});
+
+// ─── [RELAY-13] Per-team rate limiting ──────────────────────────────────────────────
+
+/**
+ * The control is a per-`teamId` budget enforced by the Workers Rate Limiting binding.
+ *
+ * Two properties get most of the attention below, because they are the two that turn a
+ * rate limiter from a protection into a liability if they are wrong:
+ *
+ *   - It is keyed on `teamId`, NEVER on an IP. Cloudflare rotates client addresses, so an
+ *     IP key throttles one legitimate sender's egress pool while an attacker on
+ *     residential proxies never lands in the same bucket twice.
+ *   - It runs AFTER authentication. A limiter in front of the credential check lets anyone
+ *     who guesses a team/route slug pair — both are semi-public, they sit in the URL a
+ *     customer pastes into Stripe — burn that team's budget with garbage tokens and take
+ *     their webhooks offline. That is a DoS amplifier aimed at the customer it protects.
+ */
+describe('[RELAY-13] per-team rate limiting', () => {
+  it('returns 429 with Retry-After once the team is over budget', async () => {
+    // The S3 assertion, in unit form. `allowFirst: 2` stands in for the deployed
+    // binding's 600/minute — the ceiling's VALUE is config; its BEHAVIOUR is this.
+    mockFetch();
+    const env = { ...baseEnv, RELAY_RATE_LIMITER: fakeLimiter({ allowFirst: 2 }) };
+
+    expect((await post('/in/acme/stripe', {}, env)).status).toBe(200);
+    expect((await post('/in/acme/stripe', {}, env)).status).toBe(200);
+
+    const throttled = await post('/in/acme/stripe', {}, env);
+    expect(throttled.status).toBe(429);
+    expect(throttled.headers.get('retry-after')).toBe(String(RATE_LIMIT_WINDOW_SECONDS));
+    expect(await throttled.json()).toMatchObject({ error: 'too many requests' });
+
+    // Over-budget means nothing was queued — a 429 that still published would be a
+    // limiter that costs money and protects nothing.
+    expect(publishCalls()).toHaveLength(2);
+  });
+
+  it('keys the budget on teamId — not on an IP, not on a slug', async () => {
+    mockFetch();
+    const limiter = fakeLimiter();
+    await post('/in/acme/stripe', { headers: { 'cf-connecting-ip': '1.2.3.4' } }, {
+      ...baseEnv,
+      RELAY_RATE_LIMITER: limiter,
+    });
+
+    expect(limiter.limit).toHaveBeenCalledWith({ key: TEAM_ID });
+    expect(limiter.seen).toEqual([TEAM_ID]);
+    expect(limiter.seen).not.toContain('1.2.3.4');
+    expect(limiter.seen).not.toContain('acme');
+  });
+
+  it('one team hitting its limit does not throttle another team', async () => {
+    // The ticket's own acceptance criterion. Two teams, one shared limiter, a budget of
+    // one: team A is throttled on its second request while team B's first still passes.
+    const OTHER_TEAM = '3f2504e0-4f89-41d3-9a0c-0305e82c3399';
+    const limiter = fakeLimiter({ allowFirst: 1 });
+    const env = { ...baseEnv, RELAY_RATE_LIMITER: limiter };
+
+    mockFetch({ lookup: { status: 200, body: activeRoute } });
+    expect((await post('/in/acme/stripe', {}, env)).status).toBe(200);
+    expect((await post('/in/acme/stripe', {}, env)).status).toBe(429);
+
+    mockFetch({ lookup: { status: 200, body: { ...activeRoute, teamId: OTHER_TEAM } } });
+    expect((await post('/in/beta/stripe', {}, env)).status).toBe(200);
+
+    expect(limiter.seen).toEqual([TEAM_ID, TEAM_ID, OTHER_TEAM]);
+  });
+
+  it('does NOT spend a team\'s budget on a request that failed authentication', async () => {
+    // Position proof, first half: an unauthenticated caller must not be able to exhaust
+    // a team it does not own.
+    mockFetch();
+    const limiter = fakeLimiter();
+    const env = { ...baseEnv, RELAY_RATE_LIMITER: limiter };
+
+    const res = await post('/in/acme/stripe', {}, env, '1'.repeat(32));
+    expect(res.status).toBe(404);
+    expect(limiter.limit).not.toHaveBeenCalled();
+  });
+
+  it('throttles BEFORE the body is buffered — 429 wins over 413', async () => {
+    // Position proof, second half. An over-budget request carrying an oversized body must
+    // be refused for the budget, not after a megabyte has already been read into the
+    // isolate. If 413 came back, the limiter would be running too late to protect anything.
+    mockFetch();
+    const env = { ...baseEnv, RELAY_RATE_LIMITER: fakeLimiter({ allowFirst: 0 }) };
+
+    const res = await post('/in/acme/stripe', { body: 'x'.repeat(MAX_BODY_BYTES + 1) }, env);
+    expect(res.status).toBe(429);
+  });
+
+  it('refuses with 503 — never fails open — when deployed with no limiter bound', async () => {
+    // The whole class of finding this sprint closed is "a control whose production
+    // guarantee rests on a variable happening to be set". An absent limiter in a deployed
+    // environment is a misconfiguration and says so, rather than silently passing traffic.
+    mockFetch();
+    const errSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+    try {
+      for (const ENVIRONMENT of ['production', 'staging'] as const) {
+        const { RELAY_RATE_LIMITER: _unbound, ...noLimiter } = baseEnv;
+        const res = await post('/in/acme/stripe', {}, { ...noLimiter, ENVIRONMENT });
+
+        expect(res.status, ENVIRONMENT).toBe(503);
+        expect(await res.json()).toMatchObject({ error: 'proxy not configured' });
+      }
+      expect(publishCalls()).toHaveLength(0);
+    } finally {
+      errSpy.mockRestore();
+    }
+  });
+
+  it('falls open in development only, so an unrelated local edit is not bricked', async () => {
+    mockFetch();
+    const { RELAY_RATE_LIMITER: _unbound, ...noLimiter } = baseEnv;
+    const res = await post('/in/acme/stripe', {}, noLimiter);
+    expect(res.status).toBe(200);
+  });
+
+  it('treats a limiter that THROWS as over budget, not under it', async () => {
+    // A limiter fails when the edge is already under stress — the one moment it matters.
+    // Swallowing the error and allowing the request removes the control exactly then.
+    mockFetch();
+    const broken = {
+      limit: vi.fn(async () => { throw new Error('rate limiter unavailable'); }),
+    };
+    const res = await post('/in/acme/stripe', {}, { ...baseEnv, RELAY_RATE_LIMITER: broken });
+
+    expect(res.status).toBe(429);
+    expect(res.headers.get('retry-after')).toBe(String(RATE_LIMIT_WINDOW_SECONDS));
+    expect(publishCalls()).toHaveLength(0);
+  });
+
+  it('carries the correlation id on a 429 and leaks nothing else', async () => {
+    mockFetch();
+    const env = { ...baseEnv, RELAY_RATE_LIMITER: fakeLimiter({ allowFirst: 0 }) };
+    const res = await post('/in/acme/stripe', {}, env);
+    const raw = await res.text();
+
+    expect(res.headers.get('relay-request-id')).toMatch(/^[0-9a-f-]{36}$/);
+    expect(raw).toContain(res.headers.get('relay-request-id'));
+    expect(raw).not.toContain(INGEST_TOKEN);
+    expect(raw).not.toContain(SECRET);
+    expect(raw).not.toContain(activeRoute.destination);
+  });
+});
+
+// ─── [S8] No credential in any log line ─────────────────────────────────────────────
+
+/**
+ * Gate condition S8, as an executable assertion rather than a promise.
+ *
+ * Every log line this Worker can emit on the ingestion path is captured across the full
+ * spread of outcomes — success, both authentication failures, throttle, SSRF refusal,
+ * oversized body, publish failure, dashboard outage, misconfiguration — and the whole
+ * transcript is searched for each credential the request had access to.
+ *
+ * It is written as a sweep over outcomes rather than one assertion per handler branch
+ * because the failure this catches is a log line added LATER on a branch nobody thought
+ * to re-check. A new branch that logs a secret has to also avoid every outcome below,
+ * which is a much harder accident to have.
+ */
+describe('[S8] no credential reaches a log line', () => {
+  const CREDENTIALS: Array<[string, string]> = [
+    ['ingest token', INGEST_TOKEN],
+    ['RELAY_API_SECRET', SECRET],
+    ['QStash token', 'qstash-token'],
+  ];
+
+  it('emits no credential across every ingestion outcome', async () => {
+    const logSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
+    const errSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+
+    try {
+      // 1. Success.
+      mockFetch();
+      await post('/in/acme/stripe');
+
+      // 2. Wrong token → 404.
+      mockFetch();
+      await post('/in/acme/stripe', {}, baseEnv, '1'.repeat(32));
+
+      // 3. No token at all → 404.
+      mockFetch();
+      await app.request(
+        '/in/acme/stripe',
+        { method: 'POST', body: '{}', headers: { [RELAY_KEY_HEADER]: SECRET } },
+        baseEnv
+      );
+
+      // 4. Throttled → 429.
+      mockFetch();
+      await post('/in/acme/stripe', {}, { ...baseEnv, RELAY_RATE_LIMITER: fakeLimiter({ allowFirst: 0 }) });
+
+      // 5. Limiter unbound in a deployed env → 503.
+      mockFetch();
+      const { RELAY_RATE_LIMITER: _unbound, ...noLimiter } = baseEnv;
+      await post('/in/acme/stripe', {}, { ...noLimiter, ENVIRONMENT: 'production' as const });
+
+      // 6. SSRF refusal → 502. The reason names the customer's host; it is logged, and
+      //    the log line is part of what is swept here.
+      mockFetch({ lookup: { status: 200, body: { ...activeRoute, destination: 'http://169.254.169.254/' } } });
+      await post('/in/acme/stripe');
+
+      // 7. Paused route → 404.
+      mockFetch({ lookup: { status: 200, body: { ...activeRoute, status: 'PAUSED' } } });
+      await post('/in/acme/stripe');
+
+      // 8. Oversized body → 413.
+      mockFetch();
+      await post('/in/acme/stripe', { body: 'x'.repeat(MAX_BODY_BYTES + 1) });
+
+      // 9. QStash rejects → 503.
+      mockFetch({ publish: { status: 400, body: { error: 'bad destination' } } });
+      await post('/in/acme/stripe');
+
+      // 10. Dashboard unreachable → 503.
+      vi.stubGlobal('fetch', vi.fn(async () => { throw new Error('connection refused'); }));
+      await post('/in/acme/stripe');
+
+      // 11. Contract violation from the dashboard → 503.
+      mockFetch({ lookup: { status: 200, body: { routeId: 'not-a-uuid' } } });
+      await post('/in/acme/stripe');
+
+      const transcript = [...logSpy.mock.calls, ...errSpy.mock.calls]
+        .map((c) => c.map((a) => (typeof a === 'string' ? a : JSON.stringify(a))).join(' '))
+        .join('\n');
+
+      // Sanity: the sweep actually produced log lines. Without this, a Worker that logged
+      // nothing at all would pass this test while telling an operator nothing.
+      expect(transcript.length).toBeGreaterThan(0);
+      expect(transcript).toContain('proxy.ingest.queued');
+
+      for (const [label, credential] of CREDENTIALS) {
+        expect(transcript, `${label} appeared in a log line`).not.toContain(credential);
+      }
+      // Nor the digest's preimage by another name: the raw Authorization header value.
+      expect(transcript).not.toContain(`Bearer ${SECRET}`);
+    } finally {
+      logSpy.mockRestore();
+      errSpy.mockRestore();
+    }
   });
 });

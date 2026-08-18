@@ -23,12 +23,45 @@ vars = { ENVIRONMENT = "production" }
 name = "coreframe-relay-proxy-staging"
 vars = { ENVIRONMENT = "staging" }
 
-# KV for idempotency keys and rate-limit counters ([RELAY-4]). Declared but not yet
+# KV for idempotency keys and the route-lookup cache ([RELAY-4]). Declared but not yet
 # bound — `wrangler kv namespace create` issues the ids, and inventing one here would
 # produce a config that looks complete and fails at deploy.
 # [[kv_namespaces]]
 # binding = "RELAY_KV"
 # id = "<issued by: wrangler kv namespace create RELAY_KV>"
+
+# [RELAY-13] Per-team ingestion rate limiter.
+#
+# This is the Workers Rate Limiting binding, NOT KV, and that is deliberate: RELAY_KV is
+# still unbound (above), so a KV-backed limiter would be inert on the deployed Worker
+# while reading as done in the source. `namespace_id` is chosen by us, not issued by
+# Cloudflare, so unlike the KV block this binding is complete as written and enforces
+# from the first deploy. Full reasoning in `src/middleware/rateLimit.ts`.
+#
+# `period` accepts 10 or 60 seconds and nothing else. 600/minute per team is 10/s
+# sustained, which is far above any real webhook source (Stripe's own burst ceiling for a
+# single account is well under this) and far below what would cost us anything.
+#
+# The key is `teamId`, applied in the handler after authentication — never an IP, which
+# Cloudflare rotates. Declared on every environment INCLUDING the top-level one so that
+# `wrangler dev` exercises the same control the deployed Worker runs.
+[[unsafe.bindings]]
+name = "RELAY_RATE_LIMITER"
+type = "ratelimit"
+namespace_id = "1001"
+simple = { limit = 600, period = 60 }
+
+[[env.production.unsafe.bindings]]
+name = "RELAY_RATE_LIMITER"
+type = "ratelimit"
+namespace_id = "1001"
+simple = { limit = 600, period = 60 }
+
+[[env.staging.unsafe.bindings]]
+name = "RELAY_RATE_LIMITER"
+type = "ratelimit"
+namespace_id = "1001"
+simple = { limit = 600, period = 60 }
 
 # [RELAY-67] Daily keep-warm ping so Supabase Free's 7-day no-activity pause never
 # fires. Hits the DASHBOARD's /api/health (which performs one real DB read), observed
