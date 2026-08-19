@@ -113,6 +113,9 @@ const env = {
   stripe: {
     secretKey: process.env.STRIPE_SECRET_KEY,
     webhookSecret: process.env.STRIPE_WEBHOOK_SECRET,
+    // n8n-wedge Payment Link (test mode only) — a single flat tier, not part
+    // of the general Buffer ladder (that's RELAY-49's scope, still TODO).
+    n8nWedgePaymentLink: process.env.NEXT_PUBLIC_N8N_WEDGE_PAYMENT_LINK,
   },
 };
 

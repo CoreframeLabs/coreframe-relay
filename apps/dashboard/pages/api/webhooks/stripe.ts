@@ -9,7 +9,7 @@ import {
   getBySubscriptionId,
   updateStripeSubscription,
 } from 'models/subscription';
-import { getByCustomerId } from 'models/team';
+import { getByCustomerId, getTeam, updateTeam } from 'models/team';
 
 export const config = {
   api: {
@@ -27,6 +27,9 @@ async function getRawBody(readable: Readable): Promise<Buffer> {
 }
 
 const relevantEvents: Stripe.Event.Type[] = [
+  // the n8n-wedge Payment Link's completion event. Kept separate
+  // from RELAY-49's general Checkout Session flow below — see handleCheckoutSessionCompleted.
+  'checkout.session.completed',
   'customer.subscription.created',
   'customer.subscription.updated',
   'customer.subscription.deleted',
@@ -51,6 +54,9 @@ export default async function POST(req: NextApiRequest, res: NextApiResponse) {
   if (relevantEvents.includes(event.type)) {
     try {
       switch (event.type) {
+        case 'checkout.session.completed':
+          await handleCheckoutSessionCompleted(event);
+          break;
         case 'customer.subscription.created':
           await handleSubscriptionCreated(event);
           break;
@@ -75,6 +81,53 @@ export default async function POST(req: NextApiRequest, res: NextApiResponse) {
     }
   }
   return res.status(200).json({ received: true });
+}
+
+// Marks a team as paying after a Payment Link checkout.
+//
+// Unlike RELAY-49's in-app Checkout Session flow (create-checkout-session.ts),
+// which already knows the team via the logged-in session and pre-creates the
+// Stripe customer via getStripeCustomerId before checkout starts, a Payment
+// Link is a static, unauthenticated URL. The only way it carries the team's
+// identity is the `client_reference_id` query param appended when the link is
+// rendered (see components/billing/N8nWedgePaymentLink.tsx) — Stripe echoes it
+// back on the resulting Checkout Session untouched.
+//
+// This handler's ONLY job is linking Team.billingId to the Stripe customer
+// that just paid. It deliberately does not touch Subscription rows: the
+// existing handleSubscriptionCreated/Updated handlers below already do that
+// for every customerId, Payment-Link-originated or not, once
+// `customer.subscription.created` arrives (Stripe fires it automatically for
+// a Payment Link using a recurring price). Re-running with the same session is
+// idempotent — updateTeam just writes the same billingId again.
+async function handleCheckoutSessionCompleted(event: Stripe.Event) {
+  const session = event.data.object as Stripe.Checkout.Session;
+  const teamId = session.client_reference_id;
+  const customerId =
+    typeof session.customer === 'string'
+      ? session.customer
+      : session.customer?.id;
+
+  if (!teamId || !customerId) {
+    // Not a Relay-initiated Payment Link checkout (no client_reference_id) —
+    // nothing to link. Other Checkout Sessions (e.g. the in-app flow) already
+    // set billingId for themselves before the session is even created.
+    return;
+  }
+
+  let team;
+  try {
+    team = await getTeam({ id: teamId });
+  } catch {
+    // client_reference_id didn't resolve to a real team (stale/tampered link)
+    // — ignore rather than throw, so a bad param can't fail the webhook.
+    return;
+  }
+
+  await updateTeam(team.slug, {
+    billingId: customerId,
+    billingProvider: 'stripe',
+  });
 }
 
 async function handleSubscriptionUpdated(event: Stripe.Event) {

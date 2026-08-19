@@ -93,3 +93,104 @@ explicit `relay_app` client rather than the ambient `DATABASE_URL`, why the mode
 mock is configured inside `jest.isolateModules` rather than at the outer binding, and
 why `consumeEnvelope`/`fetchRouteBySlugs` are exercised directly rather than through a
 req/res double. Read the file before re-running it elsewhere.*
+
+---
+
+## n8n-wedge Payment Link — test-mode verification (2026-08-19)
+
+**Scope note:** this is deliberately *not* RELAY-49 (the general Stripe products/prices/
+Checkout/webhook/Customer Portal/entitlements ticket, still TODO). It is a smaller slice:
+one test-mode Product, one Price ($19/mo, the single-flat-tier recommendation in
+`growth/product/design-panel/product-owner-revenue-2026-08-19.md` §5), one Payment Link,
+and a webhook path that marks a team as paying. No tier enforcement, no metering, no new
+billing model — see `apps/dashboard/pages/api/webhooks/stripe.ts` and
+`apps/dashboard/scripts/create-n8n-wedge-price.mjs` for what actually shipped.
+
+**Branch/worktree:** `relay/stripe-payment-link`, worktree `../coreframe-relay-worktrees/stripe-paymentlink`.
+
+**What already existed and was reused, not rebuilt:** the BoxyHQ starter kit ships a
+complete Stripe billing scaffold — `lib/stripe.ts` (customer creation), `models/subscription.ts`
+(`Subscription.active` — already exactly the "paid/not-paid flag" this ticket needed),
+`models/price.ts`/`models/service.ts`, a webhook consumer at `pages/api/webhooks/stripe.ts`
+already handling `customer.subscription.created/updated/deleted`, an in-app Checkout Session
+flow (`pages/api/teams/[slug]/payments/create-checkout-session.ts`), a Customer Portal link
+(`create-portal-link.ts` + `LinkToPortal.tsx`), and a full billing page at
+`/teams/[slug]/billing` gated on `FEATURE_TEAM_PAYMENTS` + both Stripe env vars being set —
+all wired into team RBAC (`team_payments` permission) and nav (`TeamTab.tsx`). None of this
+was known to be present before this ticket started; it changed what "smallest slice" meant —
+see the commit message for the full reasoning. The `stripe` npm package (17.7.0) was
+already a dependency; nothing new was installed.
+
+**What this ticket added:**
+1. `scripts/create-n8n-wedge-price.mjs` — idempotent script creating one test-mode Product,
+   one recurring Price ($19.00/month USD, `lookup_key: relay_n8n_wedge_monthly`), and one
+   Payment Link. Refuses to run against anything but an `sk_test_` key.
+2. `pages/api/webhooks/stripe.ts` — added `checkout.session.completed` to `relevantEvents`
+   and a new `handleCheckoutSessionCompleted` handler. Its only job: read
+   `client_reference_id` (the team id, appended to the Payment Link URL as a query param —
+   Stripe's documented mechanism for this) and `customer` off the completed session, and set
+   `Team.billingId`/`billingProvider` to that customer. The existing
+   `customer.subscription.created` handler (unchanged) then populates `Subscription.active`
+   for that same customer id, same as it already does for the in-app Checkout flow.
+3. `components/billing/N8nWedgePaymentLink.tsx` + a card on the existing `/teams/[slug]/billing`
+   page — surfaces the Payment Link (with `?client_reference_id=<team.id>` appended) to a
+   logged-in team member. Hidden entirely if `NEXT_PUBLIC_N8N_WEDGE_PAYMENT_LINK` is unset.
+
+**Command:** `node --env-file .env scripts/create-n8n-wedge-price.mjs`, then
+`node --env-file .env scripts/verify-n8n-wedge-checkout.mjs` against a locally running
+`next dev` instance.
+
+### Result: all 9 automated checks passed, run against real Stripe test-mode objects and a real local Postgres row
+
+```
+PASS — Product exists in Stripe test mode
+PASS — Price exists ($19.00/month USD)
+PASS — Payment Link exists and is active
+PASS — Payment Link URL resolves (HTTP 200)
+PASS — A test team exists locally (relay-dev)
+PASS — Webhook endpoint returned 200 (got 200)
+PASS — Invalid signature is rejected (got HTTP 400, expected 400)
+PASS — Team.billingId now equals the checkout session's customer (cus_test_65733dc511b1d0c1)
+PASS — Team.billingProvider is 'stripe'
+```
+
+Live Stripe test-mode IDs created by this run: Product `prod_V6KH4CgiGqXFu4`, Price
+`price_1U67d7FxMn2UXI5YBuA94Tcb`, Payment Link `plink_1U67d7FxMn2UXI5YoZKE96E6`
+(`https://buy.stripe.com/test_dRmcN50tTf5H58E8BH4Vy00`). Re-running the create script found
+all three already existing rather than duplicating them (idempotency check, both runs
+logged). `pnpm run sync-stripe` synced 1 product / 1 price into the local DB, which also
+makes the existing `ProductPricing`/`PaymentButton` "Get Started" flow on the billing page
+usable for the same Price via the in-app Checkout Session path.
+
+### What was and wasn't verified end-to-end
+
+**Verified for real:** the Stripe objects exist and are live (not mocked); the webhook
+route's signature verification accepts a correctly-signed payload and rejects a
+badly-signed one (400, not a silent pass); a `checkout.session.completed` event carrying a
+real team's id as `client_reference_id` results in that exact team's `billingId`/
+`billingProvider` being written to Postgres, read back, and confirmed. `check-types`,
+`check-lint`, and the full Jest suite (143/143) all pass on the changed files with zero
+new failures.
+
+**Not verified by this script, and why:** the actual card-entry step on Stripe's hosted
+Checkout page. Submitting a card number — even the `4242 4242 4242 4242` test card —
+requires either a real browser driving Stripe.js/the hosted page, or a raw API call that
+would route card data through something other than Stripe's own client-side surface. This
+project's PCI posture (SAQ A: card data never reaches our server) rules out the latter even
+in test mode, so this was deliberately left as a manual step rather than faked. The signed
+synthetic webhook event used above is the same technique Stripe's own docs recommend for
+testing webhook handlers without waiting for a live payment.
+
+### Manual click-through (not yet executed — no browser available in this environment)
+
+1. `pnpm dev`, then in another terminal: `stripe listen --forward-to localhost:4002/api/webhooks/stripe`.
+2. Log into the dashboard, open a team's Billing tab. The "Pay with Stripe" card renders
+   the Payment Link with `?client_reference_id=<team.id>` appended.
+3. Complete checkout with `4242 4242 4242 4242`, any future expiry, any CVC, any ZIP.
+4. Confirm `checkout.session.completed` (200) in the `stripe listen` terminal.
+5. `SELECT id, slug, "billingId", "billingProvider" FROM "Team" WHERE slug = '<team-slug>';`
+   and confirm both columns now point at the real customer created by the purchase.
+
+Whoever runs this manual pass next should update this section with the actual result
+rather than leave it as a TODO — per this workspace's evidence rule, an unrun step stays
+named as unrun until someone measures it.
