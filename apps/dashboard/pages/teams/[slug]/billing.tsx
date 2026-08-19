@@ -13,8 +13,9 @@ import { Error, Loading } from '@/components/shared';
 import LinkToPortal from '@/components/billing/LinkToPortal';
 import Subscriptions from '@/components/billing/Subscriptions';
 import ProductPricing from '@/components/billing/ProductPricing';
+import N8nWedgePaymentLink from '@/components/billing/N8nWedgePaymentLink';
 
-const Payments = ({ teamFeatures }) => {
+const Payments = ({ teamFeatures, n8nWedgePaymentLink }) => {
   const { t } = useTranslation('common');
   const { canAccess } = useCanAccess();
   const { isLoading, isError, team } = useTeam();
@@ -54,6 +55,10 @@ const Payments = ({ teamFeatures }) => {
           </div>
 
           <div className="py-6">
+            <N8nWedgePaymentLink team={team} paymentLinkUrl={n8nWedgePaymentLink} />
+          </div>
+
+          <div className="py-6">
             <Subscriptions subscriptions={subscriptions} />
           </div>
 
@@ -77,6 +82,7 @@ export async function getServerSideProps({
     props: {
       ...(locale ? await serverSideTranslations(locale, ['common']) : {}),
       teamFeatures: env.teamFeatures,
+      n8nWedgePaymentLink: env.stripe.n8nWedgePaymentLink ?? null,
     },
   };
 }
