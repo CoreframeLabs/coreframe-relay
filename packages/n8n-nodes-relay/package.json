@@ -1,0 +1,53 @@
+{
+  "name": "n8n-nodes-relay",
+  "version": "0.1.0",
+  "private": false,
+  "description": "n8n community node for Coreframe Relay. Send workflow data through a Relay-protected route for durable, retried delivery, using a credential holding the route's own ingest URL. Does not create or manage Relay routes and does not surface live delivery/DLQ status — see README.md.",
+  "license": "MIT",
+  "homepage": "https://github.com/CoreframeLabs/coreframe-relay/blob/main/docs/integrations/n8n.md",
+  "keywords": [
+    "n8n-community-node-package",
+    "relay",
+    "webhook",
+    "reliability",
+    "dead-letter-queue"
+  ],
+  "author": {
+    "name": "Coreframe Labs",
+    "email": "info@coreframe-labs.dev"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/CoreframeLabs/coreframe-relay.git",
+    "directory": "packages/n8n-nodes-relay"
+  },
+  "engines": {
+    "node": ">=20.0.0"
+  },
+  "files": [
+    "dist"
+  ],
+  "n8n": {
+    "n8nNodesApiVersion": 1,
+    "credentials": [
+      "dist/credentials/RelayIngestApi.credentials.js"
+    ],
+    "nodes": [
+      "dist/nodes/Relay/Relay.node.js"
+    ]
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.json && node scripts/copy-assets.mjs",
+    "check-types": "tsc --noEmit",
+    "test": "vitest run",
+    "test:watch": "vitest"
+  },
+  "peerDependencies": {
+    "n8n-workflow": "*"
+  },
+  "devDependencies": {
+    "n8n-workflow": "^2.16.0",
+    "typescript": "^5.9.3",
+    "vitest": "^2.1.8"
+  }
+}
