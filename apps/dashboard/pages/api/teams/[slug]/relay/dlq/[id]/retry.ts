@@ -10,6 +10,7 @@ import {
   claimDlqRetry,
   fetchDlqItemForTeam,
   readStoredBody,
+  readStoredHeaders,
   releaseDlqRetryClaim,
 } from 'models/dlq';
 import { recordAuditEvent } from '@/lib/audit';
@@ -20,6 +21,14 @@ import { withTeamScope } from '@/lib/db/scope';
 // because a second copy of security-critical logic that drifts is worse than one honest
 // gap, and because when RELAY-33 lands this call site becomes correct for free.
 import { validateDestination } from '@/lib/relay/ssrfGap';
+// [RELAY-65] The SAME deny-list `forwardToDestination` applies to a live delivery's
+// headers, applied here too rather than trusted implicitly. `forwardToDestination` would
+// re-apply it anyway once this envelope comes back through QStash — belt AND suspenders,
+// deliberately: `DlqItem.headers` is a plain JSON column a hand-edit or a future writer
+// could put anything in, and this file's own comment above about `ssrfGap.ts` is the
+// reminder that untrusted input gets re-checked at every boundary it crosses, not just
+// the first.
+import { filterForwardHeaders } from '@/lib/relay/forward';
 import type { AppEvent } from 'types';
 
 /**
@@ -258,15 +267,22 @@ const handlePOST = async (req: NextApiRequest, res: NextApiResponse) => {
     destination: destinationCheck.url.toString(),
     maxRetries: item.route.maxRetries,
     receivedAt: item.createdAt.toISOString(),
-    // ⚠ EMPTY, and this is a real limitation rather than an oversight. `DlqItem` has no
-    // headers column — [RELAY-5] stored the body and nothing else — so the original
-    // request headers are gone. A replay therefore arrives at the destination WITHOUT
-    // `stripe-signature`, `x-hub-signature-256` and friends, and a receiver that verifies
-    // signatures will reject it. Inventing a `content-type` we did not observe would be
-    // worse: it would make a replay look authentic while still being wrong. The UI states
-    // this plainly on the confirm step. Retaining headers needs a migration and its own
-    // ticket.
-    headers: {},
+    // [RELAY-65] The headers the FAILED attempt was sent with, not invented ones. Recovered
+    // from `DlqItem.headers` — the same map `consumeEnvelope` handed to
+    // `forwardToDestination` right before this item was written — and passed through the
+    // identical deny-list `forwardToDestination` applies to a live delivery, so this replay
+    // is filtered exactly as strictly as a first attempt, never more permissively.
+    //
+    // `readStoredHeaders` returns `{}` for a row written before this column existed (never
+    // had the map stored anywhere) — same behaviour this endpoint had before this ticket
+    // for every item, not a regression for old rows. `DlqRetryButton` reads
+    // `headersRetained` to tell an operator which case they are in.
+    //
+    // A destination signature header (`stripe-signature`, `x-hub-signature-256`,
+    // `x-shopify-hmac-sha256`, …) rides this map like any other — `filterForwardHeaders` is
+    // a deny-list precisely so vendor-specific signature headers it cannot enumerate in
+    // advance are never the thing it strips.
+    headers: filterForwardHeaders(readStoredHeaders(item.headers)),
     body,
   });
 

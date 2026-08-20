@@ -350,6 +350,19 @@ model DlqItem {
   /// stays null with `payloadKey` set.
   payload      Json?
   payloadKey   String?
+  /// [RELAY-65] The original inbound request headers as the failed forward attempt
+  /// actually sent them — proxy-filtered at ingest (`forwardableHeaders()` in
+  /// apps/proxy/src/routes/ingest.ts) and then narrowed again by `filterForwardHeaders()`
+  /// in lib/relay/forward.ts before being written here, so this column never holds a
+  /// header the forward path would have refused to transmit (`x-api-key`, `set-cookie`
+  /// and the `proxy-*` family survive ingest but not that second filter).
+  /// Nullable: rows written before this column existed never had the map stored anywhere,
+  /// so they read back as null and Retry falls back to sending no headers, same as before
+  /// this ticket. A row written after this migration always carries the map its failed
+  /// attempt was sent with, so Retry can replay it — including signature headers like
+  /// `stripe-signature` — instead of losing it, which is what let a replay defeat
+  /// destination signature verification.
+  headers      Json?
   /// Retention by tier: Free now+7d, Pro now+30d, Business now+90d.
   expiresAt    DateTime  @db.Timestamptz(6)
   retriedAt    DateTime? @db.Timestamptz(6)

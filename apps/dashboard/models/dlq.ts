@@ -36,6 +36,21 @@ export type DlqCandidate = {
   attemptCount: number;
   /** Raw request body as received. Stored inline only when small enough — see below. */
   body: string;
+  /**
+   * [RELAY-65] The headers this (failed) attempt actually put on the wire — i.e. the map
+   * AFTER `filterForwardHeaders`, which is what the caller is required to pass. Not
+   * optional: `RelayEnvelope.headers` is a required field, so a caller with no headers
+   * passes `{}`, never `undefined`.
+   *
+   * The filtering is the CALLER's job (see the note at the `recordDlqItem` call in
+   * `lib/relay/consume.ts`) and is deliberately not repeated here — this type documents
+   * the contract that makes storage safe: what lands in the column is only ever what the
+   * forward path was already willing to transmit, so the DLQ never becomes a longer-lived
+   * copy of a credential than the delivery itself was. Retry re-applies the same filter on
+   * the way back out; headers are treated as untrusted on every trip through this
+   * pipeline, not just the first.
+   */
+  headers: Record<string, string>;
 };
 
 /**
@@ -113,6 +128,10 @@ export async function recordDlqItem(
       attemptCount: candidate.attemptCount,
       payload: retained.payload,
       payloadKey: retained.payloadKey,
+      // [RELAY-65] Stored unconditionally, even `{}` — an empty object is a fact ("this
+      // request had no forwardable headers"), distinct from `null` ("nobody captured
+      // this"), and only the latter should make Retry fall back to sending nothing.
+      headers: candidate.headers as Prisma.InputJsonValue,
       expiresAt,
     },
   });
@@ -196,6 +215,13 @@ export type DlqListRow = {
   payloadPreview: string | null;
   /** True when `payloadPreview` is shorter than the stored body. */
   payloadTruncated: boolean;
+  /**
+   * [RELAY-65] False for a row written before the `headers` column existed — those never
+   * had the header map stored anywhere, so Retry sends the body alone for them, same as
+   * every row did before this ticket. True for every row written after: Retry replays the
+   * exact headers the failed attempt was sent with, signature headers included.
+   */
+  headersRetained: boolean;
   route: DlqRouteRef;
 };
 
@@ -218,6 +244,35 @@ export function readStoredBody(
   return typeof payload === 'string' ? payload : JSON.stringify(payload);
 }
 
+/**
+ * [RELAY-65] Recover the original inbound request headers from a `DlqItem.headers`
+ * column, for the retry endpoint to hand back to `forwardToDestination`.
+ *
+ * Defensive about shape, not just presence: `headers` is a plain `Json?` column, so
+ * nothing in the database stops a hand-edited or pre-migration row from holding something
+ * other than a flat string map. `retainBody()`'s sibling problem (a body that must not be
+ * re-encoded) does not apply here — a header VALUE that is not a string cannot have been
+ * what `RelayEnvelopeSchema.headers` (`z.record(z.string())`) produced, so it is dropped
+ * rather than coerced. Silently keeping a malformed value would risk handing
+ * `forwardToDestination` something `fetch` throws on; dropping it degrades to "this one
+ * header did not survive", which is what a NULL column already meant for every header
+ * before this ticket.
+ */
+export function readStoredHeaders(
+  headers: Prisma.JsonValue | null
+): Record<string, string> {
+  if (headers === null || headers === undefined) return {};
+  if (typeof headers !== 'object' || Array.isArray(headers)) return {};
+
+  const out: Record<string, string> = {};
+  for (const [name, value] of Object.entries(
+    headers as Record<string, unknown>
+  )) {
+    if (typeof value === 'string') out[name] = value;
+  }
+  return out;
+}
+
 function toListRow(item: DlqItem & { route: DlqRouteRef }): DlqListRow {
   const body = readStoredBody(item.payload);
   const preview = body === null ? null : body.slice(0, DLQ_PREVIEW_MAX_CHARS);
@@ -233,6 +288,10 @@ function toListRow(item: DlqItem & { route: DlqRouteRef }): DlqListRow {
     payloadRetained: body !== null,
     payloadBytes: body === null ? null : Buffer.byteLength(body, 'utf8'),
     payloadPreview: preview,
+    // Column-null, not "parsed to {}" — an item whose forward attempt genuinely carried
+    // no forwardable headers is stored as `{}` by `recordDlqItem`, which must read as
+    // retained-but-empty, not as "never captured".
+    headersRetained: item.headers !== null && item.headers !== undefined,
     payloadTruncated: body !== null && body.length > DLQ_PREVIEW_MAX_CHARS,
     route: item.route,
   };

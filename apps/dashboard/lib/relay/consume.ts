@@ -2,7 +2,7 @@ import type { NextApiResponse } from 'next';
 import type { RelayEnvelope } from '@coreframe-relay/types';
 
 import { withTeamScope } from '@/lib/db/scope';
-import { forwardToDestination } from '@/lib/relay/forward';
+import { filterForwardHeaders, forwardToDestination } from '@/lib/relay/forward';
 import {
   decryptDestinationHeaders,
   DestinationHeadersKeyError,
@@ -206,6 +206,26 @@ export async function consumeEnvelope(
           failReason: outcome.failReason ?? 'delivery failed',
           attemptCount,
           body,
+          // [RELAY-65] The headers of the attempt that failed for the last time.
+          // Dropping them here — as this call used to — is the root cause of RELAY-65:
+          // a manual Retry had no headers to replay, so a destination verifying
+          // `stripe-signature` / `x-hub-signature-256` / `x-shopify-hmac-sha256`
+          // rejected every retried delivery.
+          //
+          // FILTERED BEFORE STORAGE, not stored raw. `forwardToDestination` above applies
+          // `filterForwardHeaders` internally, so this is exactly the set that just went
+          // on the wire — persisting anything WIDER would write bytes we would never
+          // resend. That matters because the proxy's inbound strip list
+          // (`STRIPPED_HEADERS` in apps/proxy/src/routes/ingest.ts) is NARROWER than this
+          // deny-list: `x-api-key`, `set-cookie`, `www-authenticate` and the `proxy-*`
+          // family survive ingest but are refused at forward time. Storing the raw map
+          // would park a sender's `x-api-key` in a JSONB column for the whole retention
+          // window to no purpose — nothing reads these except a replay, and a replay
+          // re-filters them anyway. Persist only what is replayable.
+          //
+          // `filterForwardHeaders` is a DENY-list, so this narrows nothing that matters:
+          // vendor signature headers are precisely what it is built never to strip.
+          headers: filterForwardHeaders(headers),
         });
 
         if (!isTest) recordMetric('delivery.dlq');

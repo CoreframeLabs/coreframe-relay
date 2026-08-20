@@ -172,23 +172,49 @@ export function DlqRetryButton({
           </dl>
 
           {/*
-            Stated up front, not discovered afterwards. `DlqItem` has no headers column, so
-            a replay carries the body and nothing else. A destination that verifies
-            `stripe-signature` will reject it, and an operator who does not know that will
-            read the rejection as Relay being broken.
+            [RELAY-65] Two distinct states, stated up front rather than discovered from a
+            destination's rejection afterwards:
+              - `headersRetained` false: a row written before headers were captured at all
+                (pre-migration). Nothing to replay them from — same gap this warning
+                described before RELAY-65, scoped now to just the old rows.
+              - `headersRetained` true: the original headers — signature headers included —
+                ride the replay. The residual risk is not "missing headers", it is TIME: a
+                sender that binds its signature to a timestamp (Stripe defaults to a
+                5-minute tolerance) can still reject a replay sent long after the original
+                failure, headers and all.
           */}
-          <p className="flex gap-2 rounded-md border border-amber-500/30 bg-amber-500/5 p-3 text-xs text-amber-200">
-            <AlertTriangle
-              className="mt-0.5 h-4 w-4 shrink-0"
-              aria-hidden="true"
-            />
-            <span>
-              The original request headers were not stored, so the replay is
-              sent without them. If the destination verifies a signature header
-              such as <code className="font-mono">stripe-signature</code>, it
-              will reject this replay.
-            </span>
-          </p>
+          {row.headersRetained ? (
+            <p className="flex gap-2 rounded-md border border-amber-500/30 bg-amber-500/5 p-3 text-xs text-amber-200">
+              <AlertTriangle
+                className="mt-0.5 h-4 w-4 shrink-0"
+                aria-hidden="true"
+              />
+              <span>
+                The original request headers are included in this replay,
+                signature headers such as{' '}
+                <code className="font-mono">stripe-signature</code> included.
+                If the destination validates a signature timestamp against a
+                tolerance window, a retry sent long after the original
+                failure can still be rejected for being stale — that is a
+                property of the destination&apos;s clock, not of what Relay
+                sends.
+              </span>
+            </p>
+          ) : (
+            <p className="flex gap-2 rounded-md border border-amber-500/30 bg-amber-500/5 p-3 text-xs text-amber-200">
+              <AlertTriangle
+                className="mt-0.5 h-4 w-4 shrink-0"
+                aria-hidden="true"
+              />
+              <span>
+                This item predates header capture, so its original request
+                headers were never stored and the replay is sent without
+                them. If the destination verifies a signature header such as{' '}
+                <code className="font-mono">stripe-signature</code>, it will
+                reject this replay.
+              </span>
+            </p>
+          )}
 
           {outcome.kind !== 'idle' && (
             // role="status" so the result is announced. The dialog stays open on both
