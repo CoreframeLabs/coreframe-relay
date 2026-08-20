@@ -78,6 +78,14 @@ module.exports = [{
         // locale. RELAY-60 records that decision as open rather than settled.
         "components/relay/**/*.tsx",
         "pages/teams/[slug]/relay/**/*.tsx",
+        // [RELAY-80/RELAY-81] Privacy Notice and DPA are long-form legal text that has
+        // to read as an exact, controlled document, not per-string translation keys —
+        // same rationale as the landing page above, applied to
+        // `pages/privacy.tsx`/`pages/dpa.tsx` and their shared `components/legal/**`
+        // chrome.
+        "components/legal/**/*.tsx",
+        "pages/privacy.tsx",
+        "pages/dpa.tsx",
     ],
 
     rules: {
