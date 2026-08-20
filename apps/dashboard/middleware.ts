@@ -100,6 +100,14 @@ const unAuthenticatedRoutes = [
   // anonymous visitor to `/auth/login` instead of showing the page.
   '/terms',
   '/refund-policy',
+  // [RELAY-80 / RELAY-81] Same reasoning as RELAY-79/82 above, for the Privacy Notice
+  // and DPA (`NEXT_PUBLIC_PRIVACY_URL` / `NEXT_PUBLIC_DPA_URL`) — landed on a parallel
+  // branch that never touched this file, so these two were missing from the allowlist
+  // even after RELAY-79/82's entries above were added. Found 2026-08-20 by curling
+  // production directly post-deploy: both 307'd to /auth/login instead of rendering,
+  // which defeats a public legal document's entire purpose.
+  '/privacy',
+  '/dpa',
 ];
 
 /**
