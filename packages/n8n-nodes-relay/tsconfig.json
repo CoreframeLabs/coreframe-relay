@@ -1,0 +1,27 @@
+{
+  "compilerOptions": {
+    // n8n loads compiled node/credential files with `require()`, not an ESM import —
+    // unlike this monorepo's other packages (apps/proxy, packages/types), this is a
+    // hard requirement of n8n's own node loader, not a style choice. module/target
+    // match n8n's own n8n-nodes-starter template as of 2026-08.
+    "target": "es2019",
+    "module": "commonjs",
+    "moduleResolution": "node",
+    "lib": ["es2019", "es2020", "es2022.error"],
+    "outDir": "./dist/",
+    "rootDir": "./src/",
+    "strict": true,
+    "noUncheckedIndexedAccess": true,
+    "noImplicitOverride": true,
+    "noUnusedLocals": true,
+    "noUnusedParameters": true,
+    "forceConsistentCasingInFileNames": true,
+    "esModuleInterop": true,
+    "resolveJsonModule": true,
+    "declaration": true,
+    "sourceMap": true,
+    "skipLibCheck": true
+  },
+  "include": ["src/**/*.ts", "src/**/*.json"],
+  "exclude": ["dist", "test", "node_modules"]
+}
