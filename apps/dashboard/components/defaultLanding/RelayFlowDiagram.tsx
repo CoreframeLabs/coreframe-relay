@@ -18,6 +18,11 @@
  * v2 tokens: violet accents → teal (contract §4). Motion is CSS only (no dependency
  * could be installed — RELAY-62) and is switched off wholesale by
  * `prefers-reduced-motion: reduce` in `styles/globals.css`.
+ *
+ * [ui-revamp Phase 1/4] `Node`/`Wire`/the outer diagram wrapper are tokenized onto
+ * `--landing-*` (see `LandingPrimitives.tsx`'s file header) and flip with the rest
+ * of the page. `Terminal` deliberately stays fixed dark in both themes — it's a
+ * simulated `curl` + response, same reasoning as `GapSection.tsx`'s panes.
  */
 import type { ReactNode } from 'react';
 
@@ -33,16 +38,16 @@ const Node = ({
   <div
     className={`rounded-lg border p-4 text-center ${
       accent
-        ? 'border-teal-500/50 bg-teal-500/10'
-        : 'border-[#24262c] bg-[#191b20]'
+        ? 'border-landing-accent/50 bg-landing-accent/10'
+        : 'border-landing-border bg-landing-surface'
     }`}
   >
     <p
-      className={`text-sm font-semibold ${accent ? 'text-teal-200' : 'text-zinc-100'}`}
+      className={`text-sm font-semibold ${accent ? 'text-landing-accent-text' : 'text-landing-primary'}`}
     >
       {label}
     </p>
-    <p className="mt-1 text-xs leading-snug text-[#9a9ea8]">{sub}</p>
+    <p className="mt-1 text-xs leading-snug text-landing-secondary">{sub}</p>
   </div>
 );
 
@@ -51,12 +56,13 @@ const Wire = ({ children }: { children: ReactNode }) => (
   <div className="flex flex-col items-center gap-1 py-1 md:py-0">
     <span className="relay-wire-y relay-wire-animated md:hidden" />
     <span className="relay-wire-x relay-wire-animated hidden md:block" />
-    <span className="font-mono text-[10px] uppercase tracking-wider text-zinc-500">
+    <span className="font-mono text-[10px] uppercase tracking-wider text-landing-muted">
       {children}
     </span>
   </div>
 );
 
+/** Simulated terminal output — deliberately fixed dark in both themes. See file header. */
 const Terminal = () => (
   <div className="overflow-x-auto rounded-lg border border-[#24262c] bg-[#0d0f12] p-4">
     <pre className="font-mono text-xs leading-6 text-zinc-300">
@@ -77,7 +83,7 @@ const RelayFlowDiagram = ({ bare = false }: { bare?: boolean }) => {
   if (bare) return <Terminal />;
 
   return (
-    <div className="rounded-2xl border border-[#24262c] bg-[#191b20]/40 p-5 sm:p-8">
+    <div className="rounded-2xl border border-landing-border bg-landing-surface/40 p-5 sm:p-8">
       <div className="grid items-center gap-2 md:grid-cols-[1fr_7rem_1fr_7rem_1fr]">
         <Node label="Sender" sub="your service, your agent, n8n, Make" />
         <Wire>accepts</Wire>
@@ -86,7 +92,7 @@ const RelayFlowDiagram = ({ bare = false }: { bare?: boolean }) => {
         <Node label="Your endpoint" sub="CRM, internal API, workflow runner" />
       </div>
 
-      <p className="mt-6 text-center text-sm leading-relaxed text-[#9a9ea8]">
+      <p className="mt-6 text-center text-sm leading-relaxed text-landing-secondary">
         Relay answers the sender as soon as the payload is on the queue — before
         your endpoint is touched at all. Delivery happens afterwards, and keeps
         retrying with backoff until your endpoint returns a 2xx or the attempts run

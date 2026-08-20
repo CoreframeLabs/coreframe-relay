@@ -178,6 +178,84 @@ a {
  * No name collision with daisyUI: daisyUI 4 uses --p/--b1/--bc, these use
  * semantic names. Verified by grep before adding.
  * ──────────────────────────────────────────────────────────────────────────── */
+/* ─────────────────────────────────────────────────────────────────────────────
+ * Landing page tokens — [ui-revamp Phase 1/4 (see growth/product/design-panel/
+ * ui-revamp-spec-2026-08-19.md §3.2/§3.3)]. `components/defaultLanding/**` used to
+ * hardcode arbitrary-value hex utilities (`bg-[#0d0f12]` etc.) and deliberately
+ * opted out of the app's light/dark toggle. This block extends the SAME toggle
+ * mechanism already driving the shadcn block above — `lib/theme.ts`'s
+ * `applyTheme` sets/unsets `.dark` on `<html>`, nothing new added — to the
+ * landing page, without repurposing `--background`/`--border`/etc. above: those
+ * are consumed app-wide by BoxyHQ + `components/relay/*` and retuning them is a
+ * larger-blast-radius Phase 2/3 job this pass doesn't touch. Namespaced
+ * `--landing-*` and registered as the `landing` colour family in
+ * `tailwind.config.js` (`bg-landing-base`, `text-landing-primary`, etc.).
+ *
+ * Dark values are the existing, already-shipped landing palette
+ * (`LandingPrimitives.tsx`'s original hex); light values start from the spec's
+ * §3.2 table. THREE of the spec's values were changed after actually measuring
+ * WCAG contrast rather than assuming it (spec §3.2 itself asks for exactly this:
+ * "state it as checked, not assumed"). Every ratio below is computed, not quoted:
+ *
+ *  1. `--landing-text-muted` light was #9aa2ad → 2.43:1 on #f7f8fa. The spec
+ *     scopes muted to "disabled, placeholders", but the landing page uses it for
+ *     real prose (HeroSection's pricing line, FoundingAccessSection's fine print),
+ *     so it has to clear 4.5:1, not 3:1. #667080 measures 4.71:1 on base.
+ *     Dark muted #5f6570 was 3.27:1 on #0d0f12 (and 3.09:1 on the Card surface) —
+ *     the same failure in the other theme, inherited from the original
+ *     `text-zinc-500`. #828997 measures 5.46:1 on base / 5.15:1 on Card.
+ *
+ *  2. `--landing-accent` (teal-600 #0d9488) is a FILL value, not a text value:
+ *     dark ink on it measures 5.11:1 (passes), but the accent used AS TEXT on the
+ *     light page measures only 3.52:1 on base / 3.74:1 on white — below AA for
+ *     normal text. Fill and text accents genuinely need different values in light
+ *     mode because the thresholds differ (3:1 for a UI fill vs 4.5:1 for text), so
+ *     `--landing-accent-text` / `--landing-accent-text-hover` are added alongside.
+ *     Light: teal-700 #0f766e (5.15:1 on base, 5.47:1 on white, 4.60:1 on the
+ *     accent/10 tint used by RelayFlowDiagram's accent Node) hovering to teal-800
+ *     #115e59 (7.14:1). Dark: unchanged teal-400/teal-300, which already measure
+ *     10.31:1 and higher — in dark mode fill and text accent coincide.
+ *
+ *  3. `--landing-accent-hover` light was teal-700 #0f766e, but the CTA keeps the
+ *     dark ink on hover and ink-on-teal-700 measures 3.49:1 — the button label
+ *     would drop below AA on hover. Light hover therefore goes LIGHTER (teal-500
+ *     #14b8a6, ink 7.68:1) rather than darker. This deviates from the spec's
+ *     "darker on hover in light mode" note, which assumed an ink contrast (≈7.5:1)
+ *     that does not hold at teal-700; the darker-on-hover direction is preserved
+ *     for accent TEXT, where there is no ink to keep legible.
+ * ──────────────────────────────────────────────────────────────────────────── */
+:root {
+  --landing-bg-base: #f7f8fa;
+  --landing-bg-surface: #ffffff;
+  --landing-bg-elevated: #eef0f3;
+  --landing-border: #e1e4e9;
+  --landing-text-primary: #14181f;
+  --landing-text-secondary: #5b6472;
+  --landing-text-muted: #667080;
+  --landing-text-code: #3f4753;
+  --landing-accent: #0d9488;
+  --landing-accent-hover: #14b8a6;
+  --landing-accent-text: #0f766e;
+  --landing-accent-text-hover: #115e59;
+  --landing-accent-ink: #04120f;
+}
+
+.dark {
+  --landing-bg-base: #0d0f12;
+  --landing-bg-surface: #191b20;
+  --landing-bg-elevated: #22242b;
+  --landing-border: #24262c;
+  --landing-text-primary: #f2f3f5;
+  --landing-text-secondary: #9a9ea8;
+  --landing-text-muted: #828997;
+  --landing-text-code: #c7cbd1;
+  --landing-accent: #2dd4bf;
+  --landing-accent-hover: #5eead4;
+  --landing-accent-text: #2dd4bf;
+  --landing-accent-text-hover: #5eead4;
+  --landing-accent-ink: #04120f;
+}
+
 @layer base {
   :root {
     --background: 0 0% 100%;

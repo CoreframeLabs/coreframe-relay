@@ -74,12 +74,12 @@ const SecuritySection = () => (
       {capabilities.map((capability) => (
         <Card key={capability.title}>
           <div className="flex flex-wrap items-start justify-between gap-2">
-            <h3 className="max-w-[16rem] text-base font-semibold text-zinc-100">
+            <h3 className="max-w-[16rem] text-base font-semibold text-landing-primary">
               {capability.title}
             </h3>
             <StatusChip tone="built">Built</StatusChip>
           </div>
-          <p className="mt-2 text-sm leading-relaxed text-zinc-400">
+          <p className="mt-2 text-sm leading-relaxed text-landing-secondary">
             {capability.body}
           </p>
         </Card>
