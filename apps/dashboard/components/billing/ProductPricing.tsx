@@ -55,7 +55,7 @@ const ProductPricing = ({ plans, subscriptions }: ProductPricingProps) => {
             >
               <div className="p-8">
                 <div className="flex items-center space-x-2">
-                  <h3 className="font-display text-2xl font-bold text-black">
+                  <h3 className="text-2xl font-bold text-black">
                     {plan.name}
                   </h3>
                 </div>

@@ -28,6 +28,14 @@ function MyApp({ Component, pageProps }: AppPropsWithLayout) {
       });
     }
 
+    // [ui-revamp Phase 1] `applyTheme` is client-only and this effect runs after
+    // first paint, so on its own it would flash light before correcting to dark.
+    // The pre-paint inline script in `pages/_document.tsx` now applies the same
+    // resolution synchronously before the browser paints, which makes this call a
+    // re-application of an already-correct state rather than a visible correction.
+    // It is kept (not removed) because it is still what re-syncs the theme on a
+    // client-side route transition into a freshly mounted app tree, and because the
+    // two must not diverge — if the resolution logic ever changes, change both.
     if (env.darkModeEnabled) {
       applyTheme(localStorage.getItem('theme') as Theme);
     }

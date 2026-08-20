@@ -46,8 +46,16 @@ const ProofSection = () => {
         lede="This is the receipt Stripe's timeout never gives you. Sign up, fire one request, and this row is yours in under a minute."
       />
 
+      {/* [ui-revamp Phase 1/4] Deliberately NOT re-tokenized onto `--landing-*` — this
+          figure renders a simulated delivery-log line (mono header bar + syntax-coloured
+          status codes), same "code block stays dark" reasoning as GapSection.tsx and
+          RelayFlowDiagram.tsx's Terminal. See LandingPrimitives.tsx's file header.
+          The surface is OPAQUE `bg-[#191b20]` rather than the `/60` it used to carry:
+          60% over the light base composites to ~#727377, which drops the
+          `text-zinc-300` code to 3.20:1 (below AA). Opaque it measures 11.66:1 and
+          stays the fixed dark receipt it is meant to be in both themes. */}
       <div className="relay-reveal mt-10">
-        <figure className="overflow-hidden rounded-xl border border-teal-500/30 bg-[#191b20]/60">
+        <figure className="overflow-hidden rounded-xl border border-teal-500/30 bg-[#191b20]">
           <div className="flex items-center justify-between gap-3 border-b border-[#24262c] bg-[#131518] px-4 py-2.5">
             <p className="font-mono text-[11px] uppercase tracking-wider text-zinc-500">
               Delivery log — one row, the shape of the data

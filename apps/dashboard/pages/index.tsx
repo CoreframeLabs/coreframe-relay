@@ -1,8 +1,13 @@
 /**
  * [RELAY-64] Public landing page for Coreframe Relay.
  *
- * The page is one dark surface (start to end) rather than the daisyUI theme toggle's
- * two skins, per `relay-ui-ux-spec.md` §1.1 ("Dark Mode Primary"). It sells Buffer —
+ * [ui-revamp Phase 1/4, growth/product/design-panel/ui-revamp-spec-2026-08-19.md]
+ * The page used to be one hardcoded dark surface (start to end), opted out of the
+ * daisyUI theme toggle per the original `relay-ui-ux-spec.md` §1.1 ("Dark Mode
+ * Primary") contract. Per the revamp spec's research (dark-first is a real,
+ * evidenced pattern for dev/infra tooling, but dark-*only*-with-no-toggle is the
+ * actually dated part) the page now runs on the same `--landing-*` token system and
+ * `.dark`-class toggle as the rest of the app, light default. It sells Buffer —
  * webhook receipt, retry and delivery — and nothing else. Per RELAY-55 Gate and
  * Shield appear only in `RoadmapSection`, labelled as roadmap, because they are
  * unbuilt. There are no metrics, customer logos or testimonials anywhere on this
@@ -45,13 +50,13 @@ const LandingPage: NextPageWithLayout = () => {
         />
       </Head>
 
-      {/* Contract §4 token pass: page adopts coreframe-website's palette values as
-          arbitrary-value Tailwind classes over the existing utility structure.
-          `bg-[#0d0f12]` page, `text-[#f2f3f5]` headings, `text-[#9a9ea8]` body,
-          teal accent (primary CTA `bg-teal-600 text-[#04120f]`, focus `ring-teal-400`).
-          The wrapper carries the dark surface so the route is dark regardless of
-          the daisyUI theme toggle's `.dark` class. */}
-      <div className="min-h-screen bg-[#0d0f12] text-[#9a9ea8] antialiased">
+      {/* [ui-revamp Phase 1/4] The wrapper now consumes `--landing-*` tokens
+          (styles/globals.css, registered in tailwind.config.js as the `landing`
+          colour family) instead of hardcoded hex — `bg-landing-base` page,
+          `text-landing-secondary` body default, headings opt into
+          `text-landing-primary` per-component. The route follows the same `.dark`
+          class the rest of the app toggles (`lib/theme.ts`), light by default. */}
+      <div className="min-h-screen bg-landing-base text-landing-secondary antialiased">
         <LandingNav />
         <main>
           {/* Contract §3 section order: Hero (incl. Gap) → Proof → Product → Security → Founding Access/CTA → Footer. RELAY-55: every section sells the phase that exists — Buffer — and nothing else.

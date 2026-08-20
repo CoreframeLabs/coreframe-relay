@@ -21,8 +21,43 @@ module.exports = {
   },
   theme: {
     extend: {
-      // shadcn/ui — resolves against the CSS variables in styles/globals.css.
+      // NOTE — no `fontFamily` key here, deliberately. [ui-revamp Phase 1] Until
+      // this pass, `font-display` was applied to every landing heading (and one
+      // billing heading) but was never defined in `theme.extend.fontFamily` and is
+      // not a Tailwind built-in, so Tailwind silently dropped it: those headings
+      // were already rendering in the `globals.css` system stack, and had been
+      // since the class was introduced. Per spec §3.4 the dead class was removed
+      // rather than backfilled with a real display face — the £0 constraint makes a
+      // webfont optional, and removing it changes nothing visually while making
+      // what actually renders match what the markup says. If a display face is ever
+      // wanted, wire it via `next/font/google` (ships with Next, no new dependency)
+      // and register it here; do not re-add a bare `font-display` class.
+      // Landing page tokens — [ui-revamp Phase 1/4]. Resolves against the
+      // `--landing-*` CSS variables in styles/globals.css (§3.2/§3.3 of
+      // ui-revamp-spec-2026-08-19.md), toggled by the same `.dark` class as the
+      // shadcn block below. Plain hex `var()` refs (not `hsl(var())`) since the
+      // landing tokens are stored as hex, not HSL triplets.
       colors: {
+        landing: {
+          base: 'var(--landing-bg-base)',
+          surface: 'var(--landing-bg-surface)',
+          elevated: 'var(--landing-bg-elevated)',
+          border: 'var(--landing-border)',
+          primary: 'var(--landing-text-primary)',
+          secondary: 'var(--landing-text-secondary)',
+          muted: 'var(--landing-text-muted)',
+          code: 'var(--landing-text-code)',
+          // `accent` is the FILL value (button/chip backgrounds, dots, rules);
+          // `accent-text` is the value safe to use as TEXT on the page's own
+          // surfaces. They differ in light mode only, because a UI fill needs
+          // 3:1 and text needs 4.5:1 — see the measured ratios in globals.css.
+          accent: 'var(--landing-accent)',
+          'accent-hover': 'var(--landing-accent-hover)',
+          'accent-text': 'var(--landing-accent-text)',
+          'accent-text-hover': 'var(--landing-accent-text-hover)',
+          'accent-ink': 'var(--landing-accent-ink)',
+        },
+        // shadcn/ui — resolves against the CSS variables in styles/globals.css.
         border: 'hsl(var(--border))',
         input: 'hsl(var(--input))',
         ring: 'hsl(var(--ring))',

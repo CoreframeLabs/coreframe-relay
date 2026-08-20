@@ -67,26 +67,26 @@ const FoundingAccessSection = () => (
       {/* The anchor */}
       <Card className="relay-reveal lg:col-span-3">
         <div className="flex flex-wrap items-baseline justify-between gap-2">
-          <p className="font-display text-4xl font-semibold tracking-tight text-[#f2f3f5]">
+          <p className="text-4xl font-semibold tracking-tight text-landing-primary">
             Free
-            <span className="text-base font-medium text-[#9a9ea8]">
+            <span className="text-base font-medium text-landing-secondary">
               {' '}
               during Founding Access
             </span>
           </p>
-          <p className="font-mono text-xs text-[#9a9ea8]">no card · nothing charged</p>
+          <p className="font-mono text-xs text-landing-secondary">no card · nothing charged</p>
         </div>
 
-        <p className="mt-4 text-sm font-medium text-[#f2f3f5]">
+        <p className="mt-4 text-sm font-medium text-landing-primary">
           Founding Access runs on the real pipeline, not a sandbox.
         </p>
 
         <ul className="mt-5 space-y-2">
           {included.map((item) => (
-            <li key={item} className="flex items-start gap-2 text-sm text-[#9a9ea8]">
+            <li key={item} className="flex items-start gap-2 text-sm text-landing-secondary">
               <span
                 aria-hidden="true"
-                className="mt-1.5 h-1.5 w-1.5 shrink-0 rounded-full bg-teal-400"
+                className="mt-1.5 h-1.5 w-1.5 shrink-0 rounded-full bg-landing-accent"
               />
               <span>{item}</span>
             </li>
@@ -95,12 +95,12 @@ const FoundingAccessSection = () => (
 
         {/* The Hookdeck line and the pricing anchor: £99/mo is named as where the
             ladder eventually sits, explicitly not live yet. */}
-        <p className="mt-6 border-t border-[#24262c] pt-4 text-sm leading-relaxed text-[#9a9ea8]">
+        <p className="mt-6 border-t border-landing-border pt-4 text-sm leading-relaxed text-landing-secondary">
           Pricing lands once usage-based billing ships. The anchor is{' '}
-          <span className="text-[#f2f3f5]">£99/mo flat</span> — Hookdeck runs
+          <span className="text-landing-primary">£99/mo flat</span> — Hookdeck runs
           US$39 to US$499 a month for the same category, and Relay would
           invoice in GBP with onboarding included.{' '}
-          <span className="text-[#f2f3f5]">
+          <span className="text-landing-primary">
             Founding teams get in before that ladder is fixed in Stripe.
           </span>
         </p>
@@ -111,7 +111,7 @@ const FoundingAccessSection = () => (
         <Eyebrow>Why it&apos;s free right now</Eyebrow>
         <ul className="space-y-4">
           {whyFree.map((reason) => (
-            <li key={reason} className="text-sm leading-relaxed text-[#9a9ea8]">
+            <li key={reason} className="text-sm leading-relaxed text-landing-secondary">
               {reason}
             </li>
           ))}
@@ -125,14 +125,14 @@ const FoundingAccessSection = () => (
         here now that LimitsSection itself is gone. */}
     <details className="relay-reveal mx-auto mt-10 max-w-3xl text-left">
       <summary
-        className={`inline-flex w-full cursor-pointer list-none items-center justify-center gap-2 rounded px-3 py-2 text-center text-sm font-medium text-teal-300 transition-colors hover:text-teal-200 [&::-webkit-details-marker]:hidden ${focusRing}`}
+        className={`inline-flex w-full cursor-pointer list-none items-center justify-center gap-2 rounded px-3 py-2 text-center text-sm font-medium text-landing-accent-text transition-colors hover:text-landing-accent-text-hover [&::-webkit-details-marker]:hidden ${focusRing}`}
       >
         What Founding Access doesn&apos;t include yet →
       </summary>
       <Card className="mt-3">
-        <ul className="space-y-4 text-sm leading-relaxed text-[#9a9ea8]">
+        <ul className="space-y-4 text-sm leading-relaxed text-landing-secondary">
           <li>
-            <span className="font-semibold text-[#f2f3f5]">
+            <span className="font-semibold text-landing-primary">
               Delivery is at-least-once.
             </span>{' '}
             &quot;at-least-once delivery — your handler has to make it
@@ -142,7 +142,7 @@ const FoundingAccessSection = () => (
             requestId, so a duplicate is visible, never hidden.
           </li>
           <li>
-            <span className="font-semibold text-[#f2f3f5]">
+            <span className="font-semibold text-landing-primary">
               Your endpoint&apos;s own bugs.
             </span>{' '}
             Relay will deliver a webhook your handler mishandles, log the 4xx,
@@ -150,7 +150,7 @@ const FoundingAccessSection = () => (
             correct.
           </li>
           <li>
-            <span className="font-semibold text-[#f2f3f5]">
+            <span className="font-semibold text-landing-primary">
               A payload over 1 MiB, or its original headers.
             </span>{' '}
             Over-cap bodies are refused with a 413 before they are buffered —
@@ -161,7 +161,7 @@ const FoundingAccessSection = () => (
             replayed byte-identically and the destination will reject it.
           </li>
           <li>
-            <span className="font-semibold text-[#f2f3f5]">
+            <span className="font-semibold text-landing-primary">
               No billing, no metering, no caps.
             </span>{' '}
             Founding Access is free, full stop, until usage-based billing
@@ -172,27 +172,27 @@ const FoundingAccessSection = () => (
     </details>
 
     {/* CTA repeat + the no-commitment card-bouncer catch. */}
-    <div className="relay-reveal mt-10 rounded-2xl border border-[#24262c] bg-[#191b20]/60 p-6 text-center sm:p-10">
+    <div className="relay-reveal mt-10 rounded-2xl border border-landing-border bg-landing-surface/60 p-6 text-center sm:p-10">
       <div className="mx-auto flex max-w-md flex-col items-stretch justify-center gap-3 sm:flex-row sm:items-center">
         <LandingLink href="/auth/join">Request Founding Access</LandingLink>
         <LandingLink href="mailto:info@coreframe-labs.dev" variant="secondary">
           Talk to us before you connect anything
         </LandingLink>
       </div>
-      <p className="mx-auto mt-4 max-w-xl text-sm text-[#9a9ea8]">
+      <p className="mx-auto mt-4 max-w-xl text-sm text-landing-secondary">
         Free, no card, nothing charged. What&apos;s not built yet is above.
       </p>
 
       <details className="mx-auto mt-6 max-w-xl text-left">
         <summary
-          className={`inline-flex w-full cursor-pointer list-none items-center justify-center gap-2 rounded px-3 py-2 text-center text-sm font-medium text-teal-300 transition-colors hover:text-teal-200 [&::-webkit-details-marker]:hidden ${focusRing}`}
+          className={`inline-flex w-full cursor-pointer list-none items-center justify-center gap-2 rounded px-3 py-2 text-center text-sm font-medium text-landing-accent-text transition-colors hover:text-landing-accent-text-hover [&::-webkit-details-marker]:hidden ${focusRing}`}
         >
           Not ready to connect anything yet? Read the three things to get right →
         </summary>
-        <div className="mt-3 rounded-lg border border-[#24262c] bg-[#0d0f12] p-5">
-          <ol className="list-decimal space-y-3 pl-5 text-sm leading-relaxed text-[#9a9ea8]">
+        <div className="mt-3 rounded-lg border border-landing-border bg-landing-base p-5">
+          <ol className="list-decimal space-y-3 pl-5 text-sm leading-relaxed text-landing-secondary">
             <li>
-              <span className="font-semibold text-[#f2f3f5]">
+              <span className="font-semibold text-landing-primary">
                 Answer senders fast, then finish the work.
               </span>{' '}
               Stripe and most vendors time out in a few seconds. Acknowledge with a
@@ -200,14 +200,14 @@ const FoundingAccessSection = () => (
               pipeline runs — or the sender treats the event as failed.
             </li>
             <li>
-              <span className="font-semibold text-[#f2f3f5]">
+              <span className="font-semibold text-landing-primary">
                 Make handlers idempotent.
               </span>{' '}
               Senders retry. Key your writes on the event id so a retried webhook
               is a no-op, not a duplicate charge or a duplicate CRM lead.
             </li>
             <li>
-              <span className="font-semibold text-[#f2f3f5]">
+              <span className="font-semibold text-landing-primary">
                 Keep a record you can grep, with a replay path.
               </span>{' '}
               Every inbound event needs a durable receipt the moment it lands — and
@@ -215,17 +215,17 @@ const FoundingAccessSection = () => (
               is a human asking where the lead went.
             </li>
           </ol>
-          <p className="mt-4 border-t border-[#24262c] pt-3 text-xs text-zinc-500">
+          <p className="mt-4 border-t border-landing-border pt-3 text-xs text-landing-muted">
             A deeper write-up of all three is being prepared for dev.to under
             RELAY-70; the link lands here when the article is published.
           </p>
         </div>
       </details>
 
-      <p className="mt-6 text-xs text-zinc-500">
+      <p className="mt-6 text-xs text-landing-muted">
         <Link
           href="/auth/login"
-          className={`rounded underline decoration-zinc-600 underline-offset-4 transition-colors hover:text-zinc-300 ${focusRing}`}
+          className={`rounded underline decoration-landing-muted underline-offset-4 transition-colors hover:text-landing-secondary ${focusRing}`}
         >
           Sign in
         </Link>{' '}

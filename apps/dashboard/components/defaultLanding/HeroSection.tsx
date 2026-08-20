@@ -35,21 +35,21 @@ const HeroSection = () => (
 
     <div className="relative mx-auto w-full max-w-6xl px-5 pb-16 pt-14 sm:px-8 sm:pb-24 sm:pt-20">
       <div className="mx-auto max-w-3xl text-center">
-        <p className="mb-5 inline-flex items-center rounded-full border border-[#24262c] bg-[#191b20] px-3 py-1 font-mono text-[11px] uppercase tracking-wider text-zinc-400">
-          <span className="text-teal-300">Relay: Buffer</span>
-          <span aria-hidden="true" className="mx-2 text-zinc-700">
+        <p className="mb-5 inline-flex items-center rounded-full border border-landing-border bg-landing-surface px-3 py-1 font-mono text-[11px] uppercase tracking-wider text-landing-secondary">
+          <span className="text-landing-accent-text">Relay: Buffer</span>
+          <span aria-hidden="true" className="mx-2 text-landing-muted">
             /
           </span>
           <span>webhook receipt + retry</span>
         </p>
 
-        <h1 className="text-balance font-display text-4xl font-semibold leading-[1.1] tracking-tight text-[#f2f3f5] sm:text-5xl lg:text-6xl">
+        <h1 className="text-balance text-4xl font-semibold leading-[1.1] tracking-tight text-landing-primary sm:text-5xl lg:text-6xl">
           Know which webhooks{' '}
-          <span className="text-teal-300">never arrived</span> — and get them
-          back.
+          <span className="text-landing-accent-text">never arrived</span> — and
+          get them back.
         </h1>
 
-        <p className="mx-auto mt-6 max-w-2xl text-pretty text-base leading-relaxed text-[#9a9ea8] sm:text-lg">
+        <p className="mx-auto mt-6 max-w-2xl text-pretty text-base leading-relaxed text-landing-secondary sm:text-lg">
           Relay sits in front of your endpoint, counts every webhook the moment it
           lands, and re-sends the ones that fail — so a restart, a crash or a busy
           spell is never a silent loss.
@@ -67,13 +67,17 @@ const HeroSection = () => (
             first screen rather than at the old Pricing section, fold 8. No card,
             nothing charged — the number that eventually applies (£99/mo) and what
             isn't built yet both live in the Founding Access section below. */}
-        <p className="mx-auto mt-5 max-w-xl text-sm text-zinc-500">
+        <p className="mx-auto mt-5 max-w-xl text-sm text-landing-muted">
           Free while we&apos;re onboarding the first teams — no card, nothing
           charged. Pricing lands at £99/mo once usage-based billing ships; what
           Founding Access doesn&apos;t include yet is{' '}
           <a
             href="#founding-access"
-            className={`rounded text-zinc-300 underline decoration-zinc-600 underline-offset-4 transition-colors hover:text-zinc-100 ${focusRing}`}
+            /* Underline uses the muted token, not the border token: `--landing-border`
+               is a hairline value (#e1e4e9 light) that is all but invisible as text
+               decoration on the light surface, which would cost the link its
+               non-colour affordance. */
+            className={`rounded text-landing-secondary underline decoration-landing-muted underline-offset-4 transition-colors hover:text-landing-primary ${focusRing}`}
           >
             written down further down this page
           </a>

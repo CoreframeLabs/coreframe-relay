@@ -19,6 +19,13 @@
  * Motion is contract motion #3: one un-staggered two-pane replay, CSS keyframes on
  * opacity only. `prefers-reduced-motion: reduce` disables it wholesale — both panes
  * render as static before/after stills, nothing is ever hidden behind an animation.
+ *
+ * [ui-revamp Phase 1/4] Deliberately NOT re-tokenized onto `--landing-*` (see
+ * `LandingPrimitives.tsx`'s file header). These two panes simulate real terminal
+ * output — prompt, status codes, syntax-coloured response — and stay a fixed dark
+ * surface in both themes, same as a code block in a docs site. The rest of the page
+ * (nav, hero copy, section cards, footer) is theme-aware; this demo unit is an
+ * intentional dark island inside it, not an oversight.
  */
 import type { ReactNode } from 'react';
 
@@ -34,8 +41,14 @@ const Pane = ({
   children: ReactNode;
   className?: string;
 }) => (
+  /* [ui-revamp Phase 1/4] The surface is OPAQUE `bg-[#191b20]`, not the `/60` it
+     used to carry. While the whole page was dark, 60% over a #0d0f12 base still
+     composited to a dark surface; over the light base it composites to ~#727377,
+     and the `text-zinc-300` code on it measures 3.20:1 — below AA. Opaque, the
+     same text measures 11.66:1 and the pane reads as the fixed dark terminal it
+     is meant to be in both themes. Alpha is what broke the dark-island intent. */
   <div
-    className={`overflow-hidden rounded-xl border border-[#24262c] bg-[#191b20]/60 ${className}`}
+    className={`overflow-hidden rounded-xl border border-[#24262c] bg-[#191b20] ${className}`}
   >
     <div className="flex items-center gap-2 border-b border-[#24262c] bg-[#131518] px-4 py-2.5">
       <span aria-hidden="true" className="h-2.5 w-2.5 rounded-full bg-zinc-700" />

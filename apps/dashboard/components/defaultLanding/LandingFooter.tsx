@@ -30,14 +30,14 @@ import Link from 'next/link';
 import { LandingLink, focusRing } from './LandingPrimitives';
 
 const LandingFooter = () => (
-  <footer className="border-t border-[#24262c]/80">
+  <footer className="border-t border-landing-border/80">
     <div className="mx-auto w-full max-w-6xl px-5 py-12 sm:px-8">
       <div className="flex flex-col gap-6 md:flex-row md:items-end md:justify-between">
         <div className="max-w-md">
-          <p className="font-mono text-sm font-semibold text-[#f2f3f5]">
+          <p className="font-mono text-sm font-semibold text-landing-primary">
             not a dashboard. a receipt.
           </p>
-          <p className="mt-2 text-sm leading-relaxed text-[#9a9ea8]">
+          <p className="mt-2 text-sm leading-relaxed text-landing-secondary">
             Coreframe Relay — Buffer phase, built and running. No customers yet,
             so no logos, no testimonials and no invented numbers on this page. The
             three-things-to-get-right checklist above is reproducible on your own
@@ -46,13 +46,13 @@ const LandingFooter = () => (
           <nav aria-label="Footer" className="mt-4 flex flex-wrap gap-x-5 gap-y-2">
             <a
               href="#security"
-              className={`rounded text-sm text-[#9a9ea8] transition-colors hover:text-zinc-100 ${focusRing}`}
+              className={`rounded text-sm text-landing-secondary transition-colors hover:text-landing-primary ${focusRing}`}
             >
               Security
             </a>
             <a
               href="#founding-access"
-              className={`rounded text-sm text-[#9a9ea8] transition-colors hover:text-zinc-100 ${focusRing}`}
+              className={`rounded text-sm text-landing-secondary transition-colors hover:text-landing-primary ${focusRing}`}
             >
               Founding Access
             </a>
