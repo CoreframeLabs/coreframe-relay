@@ -1,0 +1,27 @@
+-- [RELAY-65] `DlqItem` gains the original inbound request headers, nullable JSONB.
+--
+-- The headers were ALWAYS captured — `apps/proxy/src/routes/ingest.ts`'s
+-- `forwardableHeaders()` puts them on `RelayEnvelope.headers`, and `consume.ts` already
+-- forwards that same map to the destination on the first three attempts (see
+-- `forwardToDestination({ headers, … })`). The final, DLQ-writing attempt was the one
+-- place that map was dropped instead of persisted, so a manual Retry replayed the body
+-- alone. A destination that verifies a signature header — `stripe-signature`,
+-- `x-hub-signature-256`, `x-shopify-hmac-sha256` — rejects that replay every time,
+-- which defeats DLQ recovery for exactly the payment/commerce traffic it exists to save.
+--
+-- What lands in the column is the map AFTER `filterForwardHeaders()` (lib/relay/forward.ts),
+-- not the raw inbound set: only headers the forward path was already willing to transmit
+-- are persisted, so the DLQ never becomes a longer-lived copy of a sender credential than
+-- the delivery attempt itself was. Signature headers are unaffected — that filter is a
+-- deny-list precisely so vendor signature headers are never what it strips.
+--
+-- Nullable, additive, no backfill: rows written before this migration have no headers to
+-- recover — the map was never stored anywhere, only forwarded and discarded — so they
+-- read back as `null` and the retry endpoint falls back to the pre-fix behaviour (an
+-- empty header set) for exactly those rows. Every row written after this migration
+-- carries the map used on its failed attempt.
+--
+-- RLS does NOT live here — see the RELAY-59 migration's note in this same directory tree;
+-- Row Level Security for the Relay tables stays in `supabase/migrations/`.
+
+ALTER TABLE "DlqItem" ADD COLUMN "headers" JSONB;

@@ -58,12 +58,20 @@ Relay doesn't implement that handshake either. Don't route a WhatsApp Business A
 verification step through Relay expecting it to work — it won't.
 
 **One thing worth knowing before you rely on DLQ replay:** Relay's DLQ "Retry" button
-currently resends the stored request body without the original request headers. If your
-n8n workflow checks a signature header itself (for example, validating
-`stripe-signature` before trusting the payload), a manual DLQ replay will fail that
-check inside your workflow, the same way it would fail against the original sender's own
-signature verification. This is a known, already-tracked gap, not a surprise you'll
-discover the hard way if you read this first.
+resends the stored request body **with the original request headers**, signature headers
+(`stripe-signature`, `x-hub-signature-256`, `x-shopify-hmac-sha256`) included, so an n8n
+workflow that verifies a signature itself will see the same header the original delivery
+carried. Two caveats remain, and both are about time rather than content:
+
+- **Timestamped signatures can still go stale.** Stripe and others bind the signature to
+  a timestamp and reject anything outside a tolerance window (Stripe's default is five
+  minutes). A replay sent long after the original failure can therefore still be refused
+  as stale, headers and all — that is the destination's clock, not something Relay
+  withholds.
+- **Items that predate this feature have no headers to replay.** DLQ rows written before
+  header retention shipped never stored the map, so replaying one behaves the old way
+  (body only). The confirm dialog tells you which of the two cases an item is in before
+  you click.
 
 ## Before you start: one constraint that matters more for n8n than most
 
