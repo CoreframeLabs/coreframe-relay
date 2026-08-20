@@ -92,6 +92,14 @@ const unAuthenticatedRoutes = [
   '/unlock-account',
   '/login/saml',
   '/.well-known/*',
+  // [RELAY-79 / RELAY-82] Terms of Service and the Refund/Cancellation Policy must be
+  // readable by a signed-out visitor: `AgreeMessage.tsx` links `/terms` (via
+  // `NEXT_PUBLIC_TERMS_URL`) from the join/login screens with `target="_blank"`, before
+  // a session exists, and Stripe's own go-live requirements expect a terms/refund link
+  // reachable without an account. Without this entry the middleware would 307 an
+  // anonymous visitor to `/auth/login` instead of showing the page.
+  '/terms',
+  '/refund-policy',
 ];
 
 /**

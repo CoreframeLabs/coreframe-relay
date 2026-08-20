@@ -15,7 +15,18 @@
  * honesty bar harder than the omission. The no-commitment "three things to get
  * right" checklist it would have carried is inlined in the Founding Access
  * section's <details> instead, and the footer notes the article is coming.
+ *
+ * [RELAY-79 / RELAY-82] Legal links added. `growth/product/relay-launch-decisions.md`
+ * decision #7 named this precisely: "The landing page footer links to #limits,
+ * #roadmap and /auth/join — no legal links at all." Terms and the Refund/Cancellation
+ * Policy now render at `/terms` and `/refund-policy` (see `components/legal/LegalPage.tsx`)
+ * and are linked from here so a visitor can actually find them without first creating
+ * an account. Privacy Notice / DPA are `relay/legal-b`'s document (RELAY-80/81),
+ * drafted in a parallel worktree — not linked from here yet to avoid this branch
+ * pointing at a route that may not exist on `main` until that work lands too.
  */
+import Link from 'next/link';
+
 import { LandingLink, focusRing } from './LandingPrimitives';
 
 const LandingFooter = () => (
@@ -45,6 +56,18 @@ const LandingFooter = () => (
             >
               Founding Access
             </a>
+            <Link
+              href="/terms"
+              className={`rounded text-sm text-[#9a9ea8] transition-colors hover:text-zinc-100 ${focusRing}`}
+            >
+              Terms
+            </Link>
+            <Link
+              href="/refund-policy"
+              className={`rounded text-sm text-[#9a9ea8] transition-colors hover:text-zinc-100 ${focusRing}`}
+            >
+              Refund Policy
+            </Link>
           </nav>
         </div>
         <div className="flex flex-col items-stretch gap-3 sm:flex-row sm:items-center">

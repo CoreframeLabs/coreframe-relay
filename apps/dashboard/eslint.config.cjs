@@ -78,6 +78,15 @@ module.exports = [{
         // locale. RELAY-60 records that decision as open rather than settled.
         "components/relay/**/*.tsx",
         "pages/teams/[slug]/relay/**/*.tsx",
+        // [RELAY-79 / RELAY-82] Terms of Service + Refund/Cancellation Policy. Same
+        // reasoning as RELAY-60 above, applied to the same pre-launch, single-locale
+        // surface: these are long-form legal copy, not app chrome, and running them
+        // through next-i18next would mean hand-splitting a legal document into dozens
+        // of translation keys with no second locale to justify it. Reversible the same
+        // day Relay commits to a second locale.
+        "components/legal/**/*.tsx",
+        "pages/terms.tsx",
+        "pages/refund-policy.tsx",
     ],
 
     rules: {
