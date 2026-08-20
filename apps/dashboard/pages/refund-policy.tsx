@@ -70,7 +70,7 @@ const SECTIONS: LegalSection[] = [
       <>
         That said, this is a very new product run by a very small team, and we
         would rather make it right than hide behind a policy. If, within{' '}
-        <strong className="text-[#f2f3f5]">14 days</strong> of your first
+        <strong className="text-landing-primary">14 days</strong> of your first
         payment, you are not satisfied with the Service, or it did not work
         as described — including the limitations we set out plainly in
         Section 3 of our{' '}

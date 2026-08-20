@@ -104,7 +104,7 @@ const SECTIONS: LegalSection[] = [
     body: [
       'We would rather you knew the honest limits of the Service before you rely on it in production than discover them during an incident. The following are not guaranteed, and no other part of these Terms should be read as promising them:',
       <>
-        <strong className="text-[#f2f3f5]">
+        <strong className="text-landing-primary">
           No uptime or availability commitment.
         </strong>{' '}
         We do not currently offer a service level agreement (SLA), a public
@@ -113,7 +113,7 @@ const SECTIONS: LegalSection[] = [
         a very small team.
       </>,
       <>
-        <strong className="text-[#f2f3f5]">
+        <strong className="text-landing-primary">
           At-least-once delivery, not exactly-once.
         </strong>{' '}
         The Service retries a delivery until it succeeds or is moved to the
@@ -124,12 +124,12 @@ const SECTIONS: LegalSection[] = [
         using a request or idempotency identifier.
       </>,
       <>
-        <strong className="text-[#f2f3f5]">A payload size limit applies.</strong>{' '}
+        <strong className="text-landing-primary">A payload size limit applies.</strong>{' '}
         Incoming requests above a size cap (currently 1 MiB) are rejected at
         the point of receipt and are not buffered.
       </>,
       <>
-        <strong className="text-[#f2f3f5]">
+        <strong className="text-landing-primary">
           DLQ retries are best-effort recovery, not a guaranteed replay of the
           original request.
         </strong>{' '}
@@ -325,7 +325,7 @@ const SECTIONS: LegalSection[] = [
     title: '16. General',
     body: [
       <>
-        <strong className="text-[#f2f3f5]">Entire agreement.</strong> These
+        <strong className="text-landing-primary">Entire agreement.</strong> These
         Terms, together with our Privacy Notice, Data Processing Addendum
         (where applicable) and Refund and Cancellation Policy, are the entire
         agreement between you and us regarding the Service and supersede any
@@ -334,30 +334,30 @@ const SECTIONS: LegalSection[] = [
         them.
       </>,
       <>
-        <strong className="text-[#f2f3f5]">Severability.</strong> If any
+        <strong className="text-landing-primary">Severability.</strong> If any
         provision of these Terms is found unenforceable, the remaining
         provisions continue in effect, and the unenforceable provision will be
         replaced with one that most closely achieves its intended effect.
       </>,
       <>
-        <strong className="text-[#f2f3f5]">No waiver.</strong> A failure to
+        <strong className="text-landing-primary">No waiver.</strong> A failure to
         enforce any provision of these Terms is not a waiver of our right to
         do so later.
       </>,
       <>
-        <strong className="text-[#f2f3f5]">Assignment.</strong> You may not
+        <strong className="text-landing-primary">Assignment.</strong> You may not
         assign or transfer these Terms without our prior written consent. We
         may assign these Terms in connection with a merger, acquisition, or
         sale of substantially all of our assets, on notice to you.
       </>,
       <>
-        <strong className="text-[#f2f3f5]">Force majeure.</strong> Neither
+        <strong className="text-landing-primary">Force majeure.</strong> Neither
         party is liable for a failure or delay in performance caused by events
         beyond its reasonable control, including failures of our third-party
         infrastructure providers.
       </>,
       <>
-        <strong className="text-[#f2f3f5]">Notices.</strong> Notices to us
+        <strong className="text-landing-primary">Notices.</strong> Notices to us
         should be sent to info@coreframe-labs.dev. Notices to you may be sent
         to the email address on your account.
       </>,

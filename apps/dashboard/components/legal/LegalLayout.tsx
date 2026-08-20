@@ -5,12 +5,14 @@
  * `#founding-access`) that only resolve on `pages/index.tsx`. Reusing them here would
  * ship two more dead links on every legal page, which is exactly the defect class
  * `relay-launch-decisions.md` already flags on the existing footer. This component is
- * self-contained instead: home, the sibling legal page, and a mailto contact link, all
+ * self-contained instead: home, the sibling legal pages, and a mailto contact link, all
  * of which resolve everywhere `LegalLayout` is used.
  *
- * Same dark-surface palette as the landing page (`bg-[#0d0f12]` / `text-[#9a9ea8]` /
- * `text-[#f2f3f5]` headings, teal accent) so a visitor landing here from the footer
- * doesn't hit a visual discontinuity — but built from scratch rather than importing
+ * Same dark-surface palette as the landing page via the `--landing-*` token system
+ * (`components/legal/LegalPage.tsx` — Terms/Refund's chrome — carries the identical
+ * palette; the two components were reconciled onto the same tokens after both landed
+ * from parallel worktrees) so a visitor landing here from the footer doesn't hit a
+ * visual discontinuity — but built from scratch rather than importing
  * `LandingPrimitives`' `Section`/`Card` components, which assume the landing page's
  * section-per-viewport rhythm rather than a single long-form document.
  */
@@ -22,7 +24,7 @@ import { focusRing } from '@/components/defaultLanding/LandingPrimitives';
 const CONTACT_EMAIL = 'info@coreframe-labs.dev';
 
 const LegalHeader = () => (
-  <header className="sticky top-0 z-20 border-b border-[#24262c]/80 bg-[#0d0f12]/90 backdrop-blur">
+  <header className="sticky top-0 z-20 border-b border-landing-border/80 bg-landing-base/90 backdrop-blur">
     <nav
       aria-label="Primary"
       className="mx-auto flex w-full max-w-4xl items-center gap-4 px-5 py-3 sm:px-8"
@@ -34,17 +36,33 @@ const LegalHeader = () => (
       >
         <span
           aria-hidden="true"
-          className="h-5 w-1.5 shrink-0 rounded-full bg-teal-400"
+          className="h-5 w-1.5 shrink-0 rounded-full bg-landing-accent"
         />
-        <span className="font-display text-sm font-semibold tracking-tight text-[#f2f3f5]">
+        <span className="text-sm font-semibold tracking-tight text-landing-primary">
           Coreframe Relay
         </span>
       </Link>
       <ul className="ml-auto flex items-center gap-5">
         <li>
           <Link
+            href="/terms"
+            className={`rounded text-sm text-landing-secondary transition-colors hover:text-landing-primary ${focusRing}`}
+          >
+            Terms of Service
+          </Link>
+        </li>
+        <li>
+          <Link
+            href="/refund-policy"
+            className={`rounded text-sm text-landing-secondary transition-colors hover:text-landing-primary ${focusRing}`}
+          >
+            Refund Policy
+          </Link>
+        </li>
+        <li>
+          <Link
             href="/privacy"
-            className={`rounded text-sm text-[#9a9ea8] transition-colors hover:text-zinc-100 ${focusRing}`}
+            className={`rounded text-sm text-landing-secondary transition-colors hover:text-landing-primary ${focusRing}`}
           >
             Privacy Notice
           </Link>
@@ -52,17 +70,9 @@ const LegalHeader = () => (
         <li>
           <Link
             href="/dpa"
-            className={`rounded text-sm text-[#9a9ea8] transition-colors hover:text-zinc-100 ${focusRing}`}
+            className={`rounded text-sm text-landing-secondary transition-colors hover:text-landing-primary ${focusRing}`}
           >
             Data Processing Addendum
-          </Link>
-        </li>
-        <li>
-          <Link
-            href="/terms"
-            className={`rounded text-sm text-[#9a9ea8] transition-colors hover:text-zinc-100 ${focusRing}`}
-          >
-            Terms of Service
           </Link>
         </li>
       </ul>
@@ -71,14 +81,14 @@ const LegalHeader = () => (
 );
 
 const LegalFooter = () => (
-  <footer className="border-t border-[#24262c]/80">
-    <div className="mx-auto flex w-full max-w-4xl flex-col gap-2 px-5 py-10 text-sm text-[#9a9ea8] sm:px-8">
+  <footer className="border-t border-landing-border/80">
+    <div className="mx-auto flex w-full max-w-4xl flex-col gap-2 px-5 py-10 text-sm text-landing-secondary sm:px-8">
       <p>
         Coreframe Labs Ltd — registered in England &amp; Wales. Questions about
         this document, or a data protection request:{' '}
         <a
           href={`mailto:${CONTACT_EMAIL}`}
-          className={`rounded text-teal-300 underline underline-offset-2 hover:text-teal-200 ${focusRing}`}
+          className={`rounded text-landing-accent-text underline underline-offset-2 hover:text-landing-accent-text-hover ${focusRing}`}
         >
           {CONTACT_EMAIL}
         </a>
@@ -87,7 +97,7 @@ const LegalFooter = () => (
       <p>
         <Link
           href="/"
-          className={`rounded underline underline-offset-2 hover:text-zinc-200 ${focusRing}`}
+          className={`rounded underline underline-offset-2 hover:text-landing-primary ${focusRing}`}
         >
           Back to coreframe-labs.dev
         </Link>
@@ -105,18 +115,18 @@ export const LegalLayout = ({
   effectiveDate: string;
   children: ReactNode;
 }) => (
-  <div className="min-h-screen bg-[#0d0f12] text-[#9a9ea8] antialiased">
+  <div className="min-h-screen bg-landing-base text-landing-secondary antialiased">
     <LegalHeader />
     <main className="mx-auto w-full max-w-4xl px-5 py-16 sm:px-8">
-      <div className="mb-10 border-b border-[#24262c]/80 pb-8">
-        <h1 className="text-balance font-display text-3xl font-semibold tracking-tight text-[#f2f3f5] sm:text-4xl">
+      <div className="mb-10 border-b border-landing-border/80 pb-8">
+        <h1 className="text-balance text-3xl font-semibold tracking-tight text-landing-primary sm:text-4xl">
           {title}
         </h1>
-        <p className="mt-3 font-mono text-xs uppercase tracking-[0.14em] text-teal-300">
+        <p className="mt-3 font-mono text-xs uppercase tracking-[0.14em] text-landing-accent-text">
           Effective {effectiveDate}
         </p>
       </div>
-      <article className="prose prose-invert prose-zinc max-w-none prose-headings:font-display prose-headings:text-[#f2f3f5] prose-a:text-teal-300 prose-a:no-underline hover:prose-a:underline prose-strong:text-[#f2f3f5] prose-th:text-[#f2f3f5]">
+      <article className="prose prose-invert prose-zinc max-w-none prose-headings:text-landing-primary prose-a:text-landing-accent-text prose-a:no-underline hover:prose-a:underline prose-strong:text-landing-primary prose-th:text-landing-primary">
         {children}
       </article>
     </main>
