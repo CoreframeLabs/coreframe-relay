@@ -164,8 +164,8 @@ const FoundingAccessSection = () => (
             signature (Stripe-Signature, X-Hub-Signature-256,
             X-Shopify-Hmac-SHA256) is replayed byte-identically on rows
             written after this shipped. DLQ rows written before it has no
-            headers to replay — that's the one remaining edge case, and the
-            confirm dialog says so per-row.
+            headers to replay — that&apos;s the one remaining edge case, and
+            the confirm dialog says so per-row.
           </li>
           <li>
             <span className="font-semibold text-landing-primary">
