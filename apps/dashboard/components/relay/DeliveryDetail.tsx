@@ -78,7 +78,18 @@ export function DeliveryDetail({
           // §3.3 asks for a drawer from the right rather than a centred modal: the operator
           // is reading a list and comparing rows, and a modal in the middle of the screen
           // covers the thing they are comparing against.
-          className="dark fixed inset-y-0 right-0 z-50 flex w-full max-w-md flex-col overflow-y-auto border-l bg-background p-6 text-foreground shadow-lg duration-200 data-[state=closed]:animate-out data-[state=open]:animate-in data-[state=closed]:fade-out-0 data-[state=open]:fade-in-0 data-[state=closed]:slide-out-to-right data-[state=open]:slide-in-from-right"
+          //
+          // [RELAY-105] This carried a hardcoded `dark` class, forcing the drawer to render
+          // dark-themed regardless of the app's actual light/dark selection — found spot-
+          // checking this file in the browser in light mode, where the drawer opened as a
+          // dark panel against the rest of a light page. Predates this ticket, from when
+          // Relay's pages had no light mode at all ("dark-first" per the note in
+          // globals.css). Per spec §3.1 both themes are now first-class, so the forced
+          // class is removed; every class below (`bg-background`, `text-foreground`,
+          // `border-border/50`, `text-muted-foreground`) is already a theme-aware shadcn
+          // token, so the drawer now re-themes with the rest of the app with no other
+          // change needed.
+          className="fixed inset-y-0 right-0 z-50 flex w-full max-w-md flex-col overflow-y-auto border-l bg-background p-6 text-foreground shadow-lg duration-200 data-[state=closed]:animate-out data-[state=open]:animate-in data-[state=closed]:fade-out-0 data-[state=open]:fade-in-0 data-[state=closed]:slide-out-to-right data-[state=open]:slide-in-from-right"
         >
           <DialogPrimitive.Close className="absolute right-4 top-4 rounded-sm opacity-70 ring-offset-background transition-opacity hover:opacity-100 focus:outline-none focus:ring-2 focus:ring-ring focus:ring-offset-2">
             <X className="h-4 w-4" aria-hidden="true" />

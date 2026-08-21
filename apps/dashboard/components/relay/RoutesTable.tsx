@@ -318,7 +318,12 @@ export function RoutesTable({
   return (
     <div className="rounded-lg border">
       {rotateError && (
-        <p className="mb-3 rounded-md border border-red-500/30 bg-red-500/5 px-3 py-2 text-sm text-red-400">
+        // [RELAY-105] Was unconditionally 'border-red-500/30 bg-red-500/5 text-red-400'
+        // — text-red-400 on this banner's own bg-red-500/5-over-white composite measures
+        // 2.60:1 in light mode (computed; fails 4.5:1 AA). Light pairing now matches the
+        // spec's error tint (bg-red-50/text-red-700); dark keeps the original values via
+        // the same `dark:` gating used throughout this codebase.
+        <p className="mb-3 rounded-md border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700 dark:border-red-500/30 dark:bg-red-500/5 dark:text-red-400">
           {rotateError}
         </p>
       )}

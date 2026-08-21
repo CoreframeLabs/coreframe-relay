@@ -239,7 +239,11 @@ export function DlqTable({
             <span
               className={
                 urgent
-                  ? 'whitespace-nowrap font-mono text-xs text-amber-300'
+                  ? // [RELAY-105] Was an unconditional 'text-amber-300' — measures
+                    // 1.44:1 on the light-mode white row background (computed; a long
+                    // way under the 4.5:1 AA floor). -700 for light, -300 kept for
+                    // dark via the same `dark:` gating already used across this file.
+                    'whitespace-nowrap font-mono text-xs text-amber-700 dark:text-amber-300'
                   : 'whitespace-nowrap font-mono text-xs text-muted-foreground'
               }
               title={`Due for deletion ${fmtDate(info.getValue())}`}
