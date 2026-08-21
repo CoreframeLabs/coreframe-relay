@@ -14,10 +14,19 @@
  * (`lib/theme.ts`, driven from `components/shared/shell/Header.tsx`) but the landing page
  * had no control reachable from it, so a first-time visitor who never touches the
  * dashboard had no way to actually switch. The `bg-[#0d0f12]/90 backdrop-blur` sticky-nav
- * treatment already here predates this pass and is kept as-is (recoloured onto the token),
- * not a new glass treatment — the spec explicitly names this nav as glass's one
- * already-approved use, and the "no glassmorphism yet" instruction is about NOT extending
- * it to modals/header/hero pills, not about removing what already shipped.
+ * treatment that used to be here predated Phase 1/4 and was kept as-is through that pass
+ * (recoloured onto the token, not upgraded) — the spec explicitly names this nav as
+ * glass's one already-approved use, but "no glassmorphism yet" in Phase 1/4 meant don't
+ * extend it further, not that it was already at spec's full treatment.
+ *
+ * [RELAY-107] Brought up to the spec §4.2 CSS proper: `backdrop-blur` (8px) →
+ * `backdrop-blur-md backdrop-saturate-150` (12px + saturation, the spec's actual
+ * recipe), background swapped from the `landing-base` (page-background) token to
+ * `landing-surface` — `#ffffff` light / `#191b20` dark, which is what the spec's own
+ * literal `bg-white/70` / `bg-[#191b20]/60` example values actually name — at 70%
+ * opacity (spec's 60-72% sweet spot), and the border recoloured to the spec's white-tint
+ * hairline (`border-white/60` light, `border-white/10` dark) rather than the neutral
+ * `--landing-border` token, plus `shadow-lg`, all per §4.2's exact block.
  *
  * The toggle reads the RESOLVED theme (the `.dark` class actually on `<html>`) rather than
  * `hooks/useTheme`'s stored preference. That hook models three states — 'light', 'dark'
@@ -62,7 +71,7 @@ const LandingNav = () => {
   };
 
   return (
-    <header className="sticky top-0 z-20 border-b border-landing-border/80 bg-landing-base/90 backdrop-blur">
+    <header className="sticky top-0 z-20 border-b border-white/60 bg-landing-surface/70 shadow-lg backdrop-blur-md backdrop-saturate-150 dark:border-white/10">
       <nav
         aria-label="Primary"
         className="mx-auto flex w-full max-w-6xl items-center gap-4 px-5 py-3 sm:px-8"

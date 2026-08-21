@@ -35,7 +35,11 @@ const HeroSection = () => (
 
     <div className="relative mx-auto w-full max-w-6xl px-5 pb-16 pt-14 sm:px-8 sm:pb-24 sm:pt-20">
       <div className="mx-auto max-w-3xl text-center">
-        <p className="mb-5 inline-flex items-center rounded-full border border-landing-border bg-landing-surface px-3 py-1 font-mono text-[11px] uppercase tracking-wider text-landing-secondary">
+        {/* [RELAY-107] Glass per ui-revamp-spec-2026-08-19.md §4.2/§4.1 — the hero's one
+            decorative eyebrow pill is "already halfway there" per the spec's own note:
+            existing translucent-surface treatment just needs `backdrop-blur` added, not
+            redesigned. Background/border/opacity left untouched deliberately. */}
+        <p className="mb-5 inline-flex items-center rounded-full border border-landing-border bg-landing-surface px-3 py-1 font-mono text-[11px] uppercase tracking-wider text-landing-secondary backdrop-blur-md">
           <span className="text-landing-accent-text">Relay: Buffer</span>
           <span aria-hidden="true" className="mx-2 text-landing-muted">
             /

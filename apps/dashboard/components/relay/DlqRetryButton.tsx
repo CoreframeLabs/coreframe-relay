@@ -138,7 +138,18 @@ export function DlqRetryButton({
       </Button>
 
       <Dialog open={open} onOpenChange={close}>
-        <DialogContent className="dark sm:max-w-lg">
+        {/*
+          [RELAY-107] This is the "DLQ retry confirm" dialog spec §4.1 names directly as a
+          glass target. `components/ui/dialog.tsx`'s `DialogContent` now carries the glass
+          treatment by default (light base + `dark:` override), but the `dark` class right
+          here is self-applied to this same element rather than an ancestor, so Tailwind's
+          `dark:` variant (a `.dark <sel>` descendant-combinator selector) never matches it
+          — this dialog is deliberately always-dark regardless of the app's real theme
+          (same convention as `DeliveryDetail.tsx` and the rest of `components/relay/**`),
+          so the dark glass values are hardcoded here instead, overriding the shared
+          default's light `bg-white/70`/`border-white/60` via tailwind-merge.
+        */}
+        <DialogContent className="dark sm:max-w-lg border-white/10 bg-[#191b20]/60">
           <DialogHeader>
             <DialogTitle>Re-send this webhook?</DialogTitle>
             <DialogDescription>

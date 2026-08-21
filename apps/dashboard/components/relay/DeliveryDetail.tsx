@@ -79,17 +79,18 @@ export function DeliveryDetail({
           // is reading a list and comparing rows, and a modal in the middle of the screen
           // covers the thing they are comparing against.
           //
-          // [RELAY-105] This carried a hardcoded `dark` class, forcing the drawer to render
-          // dark-themed regardless of the app's actual light/dark selection — found spot-
-          // checking this file in the browser in light mode, where the drawer opened as a
-          // dark panel against the rest of a light page. Predates this ticket, from when
-          // Relay's pages had no light mode at all ("dark-first" per the note in
-          // globals.css). Per spec §3.1 both themes are now first-class, so the forced
-          // class is removed; every class below (`bg-background`, `text-foreground`,
-          // `border-border/50`, `text-muted-foreground`) is already a theme-aware shadcn
-          // token, so the drawer now re-themes with the rest of the app with no other
-          // change needed.
-          className="fixed inset-y-0 right-0 z-50 flex w-full max-w-md flex-col overflow-y-auto border-l bg-background p-6 text-foreground shadow-lg duration-200 data-[state=closed]:animate-out data-[state=open]:animate-in data-[state=closed]:fade-out-0 data-[state=open]:fade-in-0 data-[state=closed]:slide-out-to-right data-[state=open]:slide-in-from-right"
+          // [RELAY-105 + RELAY-107, reconciled at merge] RELAY-105 removed a hardcoded
+          // `dark` class that forced this drawer dark regardless of the app's real theme
+          // (a light-mode user got a dark panel against a light page — predates both
+          // tickets, from when Relay had no light mode at all). RELAY-107 then added glass
+          // per spec §4.2, but its branch was cut before RELAY-105 merged, so it re-added
+          // the same forced `dark` class plus dark-only glass values — a straight
+          // regression of RELAY-105's fix, caught here rather than silently merged. Kept:
+          // no forced `dark` class, `dark:`-prefixed variants so this drawer re-themes with
+          // the rest of the app. `border-l` (not a full `border`) is intentional and
+          // unchanged from RELAY-105 — three of the drawer's four edges are the viewport
+          // edge, not a glass boundary, so only the left edge needs the glass hairline.
+          className="fixed inset-y-0 right-0 z-50 flex w-full max-w-md flex-col overflow-y-auto border-l border-white/60 bg-white/70 p-6 text-foreground shadow-lg backdrop-blur-md backdrop-saturate-150 duration-200 dark:border-white/10 dark:bg-[#191b20]/60 data-[state=closed]:animate-out data-[state=open]:animate-in data-[state=closed]:fade-out-0 data-[state=open]:fade-in-0 data-[state=closed]:slide-out-to-right data-[state=open]:slide-in-from-right"
         >
           <DialogPrimitive.Close className="absolute right-4 top-4 rounded-sm opacity-70 ring-offset-background transition-opacity hover:opacity-100 focus:outline-none focus:ring-2 focus:ring-ring focus:ring-offset-2">
             <X className="h-4 w-4" aria-hidden="true" />
