@@ -78,7 +78,20 @@ export function DeliveryDetail({
           // §3.3 asks for a drawer from the right rather than a centred modal: the operator
           // is reading a list and comparing rows, and a modal in the middle of the screen
           // covers the thing they are comparing against.
-          className="dark fixed inset-y-0 right-0 z-50 flex w-full max-w-md flex-col overflow-y-auto border-l bg-background p-6 text-foreground shadow-lg duration-200 data-[state=closed]:animate-out data-[state=open]:animate-in data-[state=closed]:fade-out-0 data-[state=open]:fade-in-0 data-[state=closed]:slide-out-to-right data-[state=open]:slide-in-from-right"
+          //
+          // [RELAY-107] Glass per ui-revamp-spec-2026-08-19.md §4.2 — this drawer is the
+          // named "delivery detail drawer / side panel" target, same overlay logic as
+          // modals. Only the DARK glass values are applied (no `dark:`-prefixed light
+          // variant): the literal `dark` class above is self-applied to THIS element, not
+          // an ancestor, so Tailwind's `dark:` variant (compiled as `.dark <sel>`, a
+          // descendant combinator) would never match it — verified by reading how
+          // `darkMode: 'class'` compiles in `tailwind.config.js`. `bg-background` already
+          // rendered dark correctly despite that, because it resolves a CSS custom
+          // property (`.dark { --background: ... }` sets the variable on this element's
+          // own computed style, which custom properties don't need an ancestor for) — but
+          // that token has no alpha slot for a glass `/60`, hence the hardcoded hex below,
+          // matching the spec's own literal dark example value exactly.
+          className="dark fixed inset-y-0 right-0 z-50 flex w-full max-w-md flex-col overflow-y-auto border-l border-white/10 bg-[#191b20]/60 p-6 text-foreground shadow-lg backdrop-blur-md backdrop-saturate-150 duration-200 data-[state=closed]:animate-out data-[state=open]:animate-in data-[state=closed]:fade-out-0 data-[state=open]:fade-in-0 data-[state=closed]:slide-out-to-right data-[state=open]:slide-in-from-right"
         >
           <DialogPrimitive.Close className="absolute right-4 top-4 rounded-sm opacity-70 ring-offset-background transition-opacity hover:opacity-100 focus:outline-none focus:ring-2 focus:ring-ring focus:ring-offset-2">
             <X className="h-4 w-4" aria-hidden="true" />

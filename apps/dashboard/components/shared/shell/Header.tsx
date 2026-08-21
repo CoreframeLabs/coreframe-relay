@@ -30,7 +30,19 @@ const Header = ({ setSidebarOpen }: HeaderProps) => {
   const { user } = data;
 
   return (
-    <div className="sticky top-0 z-40 flex h-14 shrink-0 items-center border-b px-4 sm:gap-x-6 sm:px-6 lg:px-8 bg-white dark:bg-black dark:text-white">
+    <div
+      // [RELAY-107] Glass treatment per ui-revamp-spec-2026-08-19.md §4.2 — sticky nav is
+      // one of the four surfaces the spec names as glass's justified use (content scrolls
+      // underneath, blur communicates "stays on top"). Literal hex/opacity values match
+      // the spec's own CSS block exactly rather than routing through the shadcn
+      // `--background` token: that token is stored as a bare HSL triplet
+      // (`hsl(var(--background))`, no `<alpha-value>` slot), so a `/NN` opacity modifier on
+      // it does not reliably resolve — the spec's literal `bg-white/70` /
+      // `bg-[#191b20]/60` avoids that. `.dark` sits on `<html>` app-wide (`lib/theme.ts`),
+      // a real ancestor of this header, so `dark:` variants apply correctly here (unlike
+      // the forced-dark relay/** surfaces touched elsewhere in this ticket).
+      className="sticky top-0 z-40 flex h-14 shrink-0 items-center border-b border-white/60 bg-white/70 px-4 shadow-lg backdrop-blur-md backdrop-saturate-150 dark:border-white/10 dark:bg-[#191b20]/60 dark:text-white sm:gap-x-6 sm:px-6 lg:px-8"
+    >
       <button
         type="button"
         className="-m-2.5 p-2.5 text-gray-700 dark:text-gray-50 lg:hidden"

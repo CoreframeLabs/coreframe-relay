@@ -48,8 +48,16 @@ const DialogContent = React.forwardRef<
     <DialogOverlay />
     <DialogPrimitive.Content
       ref={ref}
+      // [RELAY-107] Glass per ui-revamp-spec-2026-08-19.md §4.2 — "modals/dialogs" is a
+      // named glass target, and this is the shared shadcn `DialogContent` primitive under
+      // every dialog in the app (`NewRouteWizard.tsx`'s real light/dark-toggle-aware
+      // modal, and the base `DlqRetryButton.tsx` overrides below). Editing it once here —
+      // rather than patching each call site — matches the spec's own guidance on `Card`
+      // in `LandingPrimitives.tsx`: retune the shared surface, don't re-invent per usage.
+      // `border`/`bg-background` (a bare-HSL token with no alpha slot) replaced with the
+      // spec's literal glass values so the `/NN` opacity actually applies.
       className={cn(
-        "fixed left-[50%] top-[50%] z-50 grid w-full max-w-lg translate-x-[-50%] translate-y-[-50%] gap-4 border bg-background p-6 shadow-lg duration-200 data-[state=open]:animate-in data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=open]:fade-in-0 data-[state=closed]:zoom-out-95 data-[state=open]:zoom-in-95 data-[state=closed]:slide-out-to-left-1/2 data-[state=closed]:slide-out-to-top-[48%] data-[state=open]:slide-in-from-left-1/2 data-[state=open]:slide-in-from-top-[48%] sm:rounded-lg",
+        "fixed left-[50%] top-[50%] z-50 grid w-full max-w-lg translate-x-[-50%] translate-y-[-50%] gap-4 border border-white/60 bg-white/70 p-6 shadow-lg backdrop-blur-md backdrop-saturate-150 duration-200 dark:border-white/10 dark:bg-[#191b20]/60 data-[state=open]:animate-in data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=open]:fade-in-0 data-[state=closed]:zoom-out-95 data-[state=open]:zoom-in-95 data-[state=closed]:slide-out-to-left-1/2 data-[state=closed]:slide-out-to-top-[48%] data-[state=open]:slide-in-from-left-1/2 data-[state=open]:slide-in-from-top-[48%] sm:rounded-lg",
         className
       )}
       {...props}
