@@ -15,8 +15,14 @@ ENVIRONMENT = "development"
 #   wrangler secret put UPSTASH_QSTASH_TOKEN
 # Local dev reads them from .dev.vars, which is gitignored.
 
+# [RELAY-43] `name` here MUST match the Cloudflare Workers script the
+# `in.relay.coreframe-labs.dev` route is already bound to — a route binds to a script by
+# NAME, and the account already has a script called "coreframe-relay" (a dash-template
+# stub, never real code) holding that route. Deploying under any other name creates a
+# second, unbound script and leaves the route serving the stub. Confirmed via the
+# Workers API's script list before this change, not assumed.
 [env.production]
-name = "coreframe-relay-proxy"
+name = "coreframe-relay"
 vars = { ENVIRONMENT = "production" }
 
 [env.staging]
