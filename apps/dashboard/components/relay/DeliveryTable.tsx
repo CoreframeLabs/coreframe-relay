@@ -305,10 +305,16 @@ export function DeliveryTable({
                           row.responseCode === null
                             ? 'text-muted-foreground'
                             : row.responseCode >= 500
-                              ? 'text-red-400'
+                              ? // [RELAY-105] Was an unconditional 'text-red-400' — the
+                                // dark-mode-tuned -400 shade measures 2.77:1 on the
+                                // light-mode white row background (fails 4.5:1 AA by a
+                                // wide margin; computed, not assumed). -700 for light,
+                                // -400 kept for dark via the same `dark:` gating pattern
+                                // used everywhere else in this codebase.
+                                'text-red-700 dark:text-red-400'
                               : row.responseCode >= 400
-                                ? 'text-amber-400'
-                                : 'text-green-400'
+                                ? 'text-amber-700 dark:text-amber-400'
+                                : 'text-green-700 dark:text-green-400'
                         )}
                       >
                         {row.responseCode ?? '—'}
