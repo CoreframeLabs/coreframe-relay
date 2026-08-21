@@ -18,7 +18,12 @@
  * Hookdeck US$39–US$499 comparison (real, kept — `relay-buffer-sales-motion.md` §1).
  *
  * LimitsSection's facts survive here, correctly scoped, inside the honesty <details>:
- * the 1 MiB payload cap and the DLQ-cannot-replay-original-headers limitation. The
+ * the 1 MiB payload cap and (until 2026-08-21, when this comment and the copy below were
+ * corrected) the DLQ-cannot-replay-original-headers limitation. RELAY-65 (merged
+ * 2026-08-19/20) fixed that: DLQ retry now replays the original request headers, so a
+ * signed webhook (Stripe-Signature etc.) survives a replay. The one remaining edge case —
+ * DLQ rows written before RELAY-65 shipped have no headers to replay — is per-row, not a
+ * standing product limitation, and the confirm dialog already states it that way. The
  * at-least-once caveat is also kept there, load-bearing per the original brief.
  *
  * On capping/invite-only: `relay-launch-decisions.md` #1 recommends invite-only, and
@@ -151,14 +156,16 @@ const FoundingAccessSection = () => (
           </li>
           <li>
             <span className="font-semibold text-landing-primary">
-              A payload over 1 MiB, or its original headers.
+              A payload over 1 MiB.
             </span>{' '}
             Over-cap bodies are refused with a 413 before they are buffered —
-            counted as they stream, never silently truncated. A retry from
-            the DLQ is your own re-send: the original headers aren&apos;t
-            kept, so a vendor signature (Stripe-Signature,
-            X-Hub-Signature-256, X-Shopify-Hmac-SHA256) can&apos;t be
-            replayed byte-identically and the destination will reject it.
+            counted as they stream, never silently truncated. DLQ retry
+            replays the original request headers (RELAY-65), so a vendor
+            signature (Stripe-Signature, X-Hub-Signature-256,
+            X-Shopify-Hmac-SHA256) is replayed byte-identically on rows
+            written after this shipped. DLQ rows written before it has no
+            headers to replay — that's the one remaining edge case, and the
+            confirm dialog says so per-row.
           </li>
           <li>
             <span className="font-semibold text-landing-primary">

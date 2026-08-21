@@ -163,10 +163,13 @@ row:
 **The DLQ** (Buffer → Dead Letter Queue) lists everything that exhausted its retries. Each row
 shows the route, the destination, and a Retry button that re-publishes the stored payload
 back through the same delivery path — once per item, and only if the payload was
-retained (payloads over 64KB aren't stored, so there's nothing to replay). Before you
-lean on this as your main recovery path, re-read the header caveat above: a replay from
-here won't carry the original request's headers, so any signature check your n8n
-workflow performs on those headers will reject it.
+retained (payloads over 64KB aren't stored, so there's nothing to replay). As of RELAY-65
+(merged 2026-08-19/20), a retry replays the original request headers too, so a signature
+check your n8n workflow performs (Stripe-Signature, X-Hub-Signature-256,
+X-Shopify-Hmac-SHA256) passes on replay the same way it did on the original delivery. The
+one exception: a DLQ row created **before** RELAY-65 shipped has no headers stored against
+it, so that specific row's replay is headerless — the confirm dialog states this per-row,
+not as a standing limitation.
 
 ## What this setup does not give you (yet)
 
