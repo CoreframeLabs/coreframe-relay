@@ -39,10 +39,18 @@ export type RouteLookupFailure =
  * How long to wait on the dashboard before giving up.
  *
  * The product promise is a sub-10ms acknowledgement, and this subrequest is the one thing
- * standing between a webhook and that promise. Two seconds is a ceiling for the pathological
- * case, not a target — a warm cached lookup does not make this call at all.
+ * standing between a webhook and that promise. This ceiling was originally 2000ms on the
+ * assumption a warm cached lookup would make this call rare — but `RELAY_KV` has never
+ * been bound (see the block below), so today EVERY request pays this cost uncached. Found
+ * 2026-08-25 via live production testing: warm round trips already ran 2000-2500ms end to
+ * end, and a cold Vercel function (cross-region: Vercel defaults to `iad1`/US-East, Supabase
+ * is `eu-west-2`/London) blew straight through 2000ms, producing a real, reproducible
+ * `503 service unavailable` on the first request after any idle period — confirmed live,
+ * 1 of 5 rapid requests failed this way, the rest succeeded around 2-2.5s each. Raised to a
+ * ceiling that actually absorbs cold-start + cross-region latency rather than one tuned for
+ * a caching layer that does not exist yet. Revisit downward once RELAY_KV is bound.
  */
-const LOOKUP_TIMEOUT_MS = 2_000;
+const LOOKUP_TIMEOUT_MS = 6_000;
 
 /**
  * Cloudflare KV refuses an `expirationTtl` below 60 seconds — the write throws, it does
