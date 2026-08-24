@@ -50,8 +50,19 @@ import { LandingLink, focusRing } from './LandingPrimitives';
 const navLinks = [
   { href: '#proof', label: 'Proof' },
   { href: '#what-it-does', label: 'What it does' },
+  { href: '#n8n', label: 'n8n' },
   { href: '#security', label: 'Security' },
   { href: '#founding-access', label: 'Founding Access' },
+];
+
+// [RELAY-108] Real routes, not in-page anchors — kept separate from `navLinks`
+// above because those render as plain `<a href="#...">` and these need
+// `next/link` for client-side routing to an actual page. Per
+// `relay-gtm-readiness-audit-2026-08-21.md` §3.2, `/pricing` needs to be
+// reachable in 1-2 clicks from `/`; the nav is the shortest path (1 click).
+const pageLinks = [
+  { href: '/docs/integrations/n8n', label: 'Docs' },
+  { href: '/pricing', label: 'Pricing' },
 ];
 
 const LandingNav = () => {
@@ -99,6 +110,17 @@ const LandingNav = () => {
               >
                 {link.label}
               </a>
+            </li>
+          ))}
+          <li aria-hidden="true" className="h-4 w-px bg-landing-border" />
+          {pageLinks.map((link) => (
+            <li key={link.href}>
+              <Link
+                href={link.href}
+                className={`rounded text-sm text-landing-secondary transition-colors hover:text-landing-primary ${focusRing}`}
+              >
+                {link.label}
+              </Link>
             </li>
           ))}
         </ul>

@@ -108,6 +108,19 @@ const unAuthenticatedRoutes = [
   // which defeats a public legal document's entire purpose.
   '/privacy',
   '/dpa',
+  // [RELAY-108] Docs surface and the public pricing page. Exact same failure mode
+  // RELAY-80/81 hit above — a route existing under `pages/` is not enough, this
+  // list is a *separate*, positive allowlist, and anything missing from it 307s to
+  // `/auth/login` regardless of whether the page itself requires no auth. Verified
+  // by curling this worktree's own build post-change (see the commit message for the
+  // actual status codes measured, not "should work"): `/docs`, `/docs/integrations/n8n`
+  // and `/pricing` all 307'd before this entry was added, exactly like /privacy and
+  // /dpa did. `/docs/**` covers `/docs/integrations/n8n` and any future nested docs
+  // page without a second entry per page — `/docs` itself still needs its own exact
+  // entry because micromatch's `**` does not match a zero-segment remainder.
+  '/docs',
+  '/docs/**',
+  '/pricing',
 ];
 
 /**
