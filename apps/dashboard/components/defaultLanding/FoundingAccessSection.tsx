@@ -35,6 +35,16 @@
  * the handler (RELAY-88, cap enforcement, is unbuilt). So this page does NOT claim an
  * enforced cap or an invite-code gate — that would be exactly the kind of unbacked claim
  * this whole page exists to avoid. If RELAY-88 ships, revisit this copy.
+ *
+ * [RELAY-108] The "£99/mo… Founding teams get in before that ladder is fixed in
+ * Stripe" paragraph is gone. It was already a "not yet live" future anchor per this
+ * comment's own history, and that framing is itself now stale: a real, director-
+ * signed, live (Stripe test mode) n8n-reliability tier exists at $19/mo flat — 5.2×
+ * lower than the £99 figure this page was still naming
+ * (`relay-gtm-readiness-audit-2026-08-21.md` §3.1). General usage-based pricing for
+ * the rest of the Buffer ladder genuinely hasn't shipped and still has no number, so
+ * the replacement paragraph says that honestly instead of inventing one, and points
+ * the n8n buyer at the real price on `/pricing` instead.
  */
 import Link from 'next/link';
 
@@ -98,16 +108,24 @@ const FoundingAccessSection = () => (
           ))}
         </ul>
 
-        {/* The Hookdeck line and the pricing anchor: £99/mo is named as where the
-            ladder eventually sits, explicitly not live yet. */}
+        {/* [RELAY-108] See file header — £99/mo removed, replaced with the real,
+            live $19/mo n8n tier and an honest "no number yet" for the general ladder. */}
         <p className="mt-6 border-t border-landing-border pt-4 text-sm leading-relaxed text-landing-secondary">
-          Pricing lands once usage-based billing ships. The anchor is{' '}
-          <span className="text-landing-primary">£99/mo flat</span> — Hookdeck runs
-          US$39 to US$499 a month for the same category, and Relay would
-          invoice in GBP with onboarding included.{' '}
+          General usage-based pricing for the rest of the Buffer ladder
+          hasn&apos;t shipped, so there&apos;s no honest number to give you
+          for it yet. If you&apos;re here for n8n webhook reliability
+          specifically, that tier is real and live today:{' '}
           <span className="text-landing-primary">
-            Founding teams get in before that ladder is fixed in Stripe.
+            $19/mo flat, no metering, no trial clock
           </span>
+          .{' '}
+          <Link
+            href="/pricing"
+            className={`rounded text-landing-accent-text underline decoration-landing-muted underline-offset-4 transition-colors hover:text-landing-accent-text-hover ${focusRing}`}
+          >
+            See pricing and pay with Stripe
+          </Link>
+          .
         </p>
       </Card>
 

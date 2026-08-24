@@ -89,6 +89,14 @@ module.exports = [{
         "pages/refund-policy.tsx",
         "pages/privacy.tsx",
         "pages/dpa.tsx",
+        // [RELAY-108] Same reasoning again: the public docs surface (long-form
+        // n8n setup content transcribed from `docs/integrations/n8n.md`) and the
+        // public pricing page are pre-launch, single-locale marketing/reference
+        // copy, not app chrome. Reversible the same day Relay commits to a
+        // second locale, same as every entry above.
+        "components/docs/**/*.tsx",
+        "pages/docs/**/*.tsx",
+        "pages/pricing.tsx",
     ],
 
     rules: {

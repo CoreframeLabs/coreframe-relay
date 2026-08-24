@@ -56,6 +56,20 @@ const LandingFooter = () => (
             >
               Founding Access
             </a>
+            {/* [RELAY-108] Docs and Pricing — the two real routes this ticket
+                added, linked from the one footer that reaches every page. */}
+            <Link
+              href="/docs/integrations/n8n"
+              className={`rounded text-sm text-[#9a9ea8] transition-colors hover:text-zinc-100 ${focusRing}`}
+            >
+              Docs
+            </Link>
+            <Link
+              href="/pricing"
+              className={`rounded text-sm text-[#9a9ea8] transition-colors hover:text-zinc-100 ${focusRing}`}
+            >
+              Pricing
+            </Link>
             <Link
               href="/terms"
               className={`rounded text-sm text-[#9a9ea8] transition-colors hover:text-zinc-100 ${focusRing}`}

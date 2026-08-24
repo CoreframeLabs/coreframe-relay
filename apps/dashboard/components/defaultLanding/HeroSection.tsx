@@ -21,7 +21,18 @@
  * Visual: the Gap (its own section file) — headline reads first, panes are proof.
  * The single decorative element is the one light source the panel kept: a soft
  * radial teal glow behind the headline at ~12% opacity, never a mesh gradient.
+ *
+ * [RELAY-108] The sub-CTA line used to name "£99/mo" as the price that "eventually
+ * applies" once usage-based billing ships. That was true when this comment was
+ * first written (RELAY-104), but per `growth/product/design-panel/
+ * ceo-revenue-call-2026-08-19.md` there is now a director-signed, live (Stripe test
+ * mode) $19/mo flat n8n-reliability tier — a real price nobody could see anywhere
+ * on this page (`relay-gtm-readiness-audit-2026-08-21.md` §3.1: "£99/mo appears
+ * nowhere a visitor can see it… the decided price is invisible"). £99/mo is gone;
+ * the line now names the real, payable price and links to `/pricing`.
  */
+import Link from 'next/link';
+
 import GapSection from './GapSection';
 import { LandingLink, focusRing } from './LandingPrimitives';
 
@@ -69,18 +80,27 @@ const HeroSection = () => (
 
         {/* [Launch-shape change] The cost/commitment answer now surfaces on the
             first screen rather than at the old Pricing section, fold 8. No card,
-            nothing charged — the number that eventually applies (£99/mo) and what
-            isn't built yet both live in the Founding Access section below. */}
+            nothing charged for general Founding Access — what isn't built yet
+            lives in the Founding Access section below.
+            [RELAY-108] £99/mo removed (see file header). The real, live, payable
+            price — $19/mo flat for the n8n-reliability tier — replaces it here. */}
         <p className="mx-auto mt-5 max-w-xl text-sm text-landing-muted">
           Free while we&apos;re onboarding the first teams — no card, nothing
-          charged. Pricing lands at £99/mo once usage-based billing ships; what
-          Founding Access doesn&apos;t include yet is{' '}
-          <a
-            href="#founding-access"
+          charged. Fixing n8n webhook reliability specifically is live today
+          at{' '}
+          <Link
+            href="/pricing"
             /* Underline uses the muted token, not the border token: `--landing-border`
                is a hairline value (#e1e4e9 light) that is all but invisible as text
                decoration on the light surface, which would cost the link its
                non-colour affordance. */
+            className={`rounded text-landing-secondary underline decoration-landing-muted underline-offset-4 transition-colors hover:text-landing-primary ${focusRing}`}
+          >
+            $19/mo flat, no metering
+          </Link>
+          . What Founding Access doesn&apos;t include yet is{' '}
+          <a
+            href="#founding-access"
             className={`rounded text-landing-secondary underline decoration-landing-muted underline-offset-4 transition-colors hover:text-landing-primary ${focusRing}`}
           >
             written down further down this page

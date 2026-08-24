@@ -31,6 +31,7 @@ import FoundingAccessSection from '@/components/defaultLanding/FoundingAccessSec
 import HeroSection from '@/components/defaultLanding/HeroSection';
 import LandingFooter from '@/components/defaultLanding/LandingFooter';
 import LandingNav from '@/components/defaultLanding/LandingNav';
+import N8nSection from '@/components/defaultLanding/N8nSection';
 import ProofSection from '@/components/defaultLanding/ProofSection';
 import SecuritySection from '@/components/defaultLanding/SecuritySection';
 import WhatItDoesSection from '@/components/defaultLanding/WhatItDoesSection';
@@ -44,9 +45,12 @@ const LandingPage: NextPageWithLayout = () => {
         <title>
           Coreframe Relay — Know which webhooks never arrived, and get them back
         </title>
+        {/* [RELAY-108] Description now names n8n and the $19/mo tier explicitly —
+            per the audit, a visitor arriving from an n8n bug thread previously had
+            no way to tell from a search snippet that this page was for them. */}
         <meta
           name="description"
-          content="Relay sits in front of your endpoint, counts every webhook the moment it lands, and re-sends the ones that fail — so a restart, a crash or a busy spell is never a silent loss."
+          content="Relay sits in front of your endpoint — including n8n's Production Webhook URL — counts every webhook the moment it lands, and re-sends the ones that fail. n8n Reliability tier: $19/month flat, no metering."
         />
       </Head>
 
@@ -75,6 +79,12 @@ const LandingPage: NextPageWithLayout = () => {
           <HeroSection />
           <ProofSection />
           <WhatItDoesSection />
+          {/* [RELAY-108] The real n8n section — see N8nSection.tsx's own header for
+              why this replaces the single incidental "n8n webhook key" mention the
+              audit found. Placed right after "what it does" so the sequence reads
+              as: here's the general capability, here's exactly what that means if
+              you're the n8n buyer who followed a link here. */}
+          <N8nSection />
           <SecuritySection />
           <FoundingAccessSection />
         </main>
