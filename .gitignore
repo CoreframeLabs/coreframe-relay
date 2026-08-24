@@ -41,3 +41,4 @@ graphify-out/
 # git worktrees (parallel agent branches) - not repo content.
 .kilo-worktrees/
 .worktrees/
+.vercel
