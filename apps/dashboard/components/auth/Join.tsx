@@ -13,9 +13,13 @@ import AgreeMessage from './AgreeMessage';
 import GoogleReCAPTCHA from '../shared/GoogleReCAPTCHA';
 import ReCAPTCHA from 'react-google-recaptcha';
 import { maxLengthPolicies } from '@/lib/common';
+import type { AttributionParams } from '@/lib/relay/attributionCookie';
 
 interface JoinProps {
   recaptchaSiteKey: string | null;
+  // [RELAY-68] Channel attribution resolved by pages/auth/join.tsx (query params or
+  // the cookie fallback) — this component just forwards it into the join POST body.
+  attribution?: AttributionParams;
 }
 
 const JoinUserSchema = Yup.object().shape({
@@ -28,7 +32,7 @@ const JoinUserSchema = Yup.object().shape({
   team: Yup.string().required().min(3).max(maxLengthPolicies.team),
 });
 
-const Join = ({ recaptchaSiteKey }: JoinProps) => {
+const Join = ({ recaptchaSiteKey, attribution }: JoinProps) => {
   const router = useRouter();
   const { t } = useTranslation('common');
   const [isPasswordVisible, setIsPasswordVisible] = useState<boolean>(false);
@@ -56,6 +60,12 @@ const Join = ({ recaptchaSiteKey }: JoinProps) => {
         body: JSON.stringify({
           ...values,
           recaptchaToken,
+          // [RELAY-68] Forwarded to pages/api/auth/join.ts, which persists them via
+          // models/team.ts's createTeam. isInternal is NOT sent — that's computed
+          // server-side from the verified signup email, never client-supplied.
+          attributionSource: attribution?.utm_source ?? null,
+          attributionMedium: attribution?.utm_medium ?? null,
+          attributionCampaign: attribution?.utm_campaign ?? null,
         }),
       });
 

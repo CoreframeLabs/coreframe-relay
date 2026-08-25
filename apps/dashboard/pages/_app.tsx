@@ -10,13 +10,32 @@ import mixpanel from 'mixpanel-browser';
 import '@boxyhq/react-ui/dist/react-ui.css';
 import '../styles/globals.css';
 import { useEffect } from 'react';
+import { useRouter } from 'next/router';
 import env from '@/lib/env';
 import { Theme, applyTheme } from '@/lib/theme';
+import { writeAttributionCookie } from '@/lib/relay/attributionCookie';
 import { Themer } from '@boxyhq/react-ui/shared';
 import { AccountLayout } from '@/components/layouts';
 
 function MyApp({ Component, pageProps }: AppPropsWithLayout) {
   const { session, ...props } = pageProps;
+  const router = useRouter();
+
+  // [RELAY-68] Capture UTM params into a first-party cookie on every page load —
+  // not just /auth/join — so the anonymous pay-first path (click "Pay with Stripe"
+  // on /pricing before ever signing up) has a fallback back to the marketing click
+  // that brought the visitor here. See lib/relay/attributionCookie.ts for the full
+  // rationale and pages/auth/join.tsx for the read side. Re-runs on client-side
+  // route changes (router.asPath), not just the initial full page load, so a
+  // UTM-tagged link clicked between two already-loaded pages of this app is still
+  // captured.
+  useEffect(() => {
+    writeAttributionCookie({
+      utm_source: router.query.utm_source as string | undefined,
+      utm_medium: router.query.utm_medium as string | undefined,
+      utm_campaign: router.query.utm_campaign as string | undefined,
+    });
+  }, [router.asPath]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Add mixpanel
   useEffect(() => {

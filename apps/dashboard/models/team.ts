@@ -12,13 +12,33 @@ export const createTeam = async (param: {
   userId: string;
   name: string;
   slug: string;
+  // [RELAY-68] Channel attribution, captured at signup — see the doc-comment on
+  // Team.attributionSource in schema.prisma for why these are nullable with no
+  // default and isInternal is computed server-side only (pages/api/auth/join.ts),
+  // never accepted from a caller of this function as client-supplied.
+  attributionSource?: string | null;
+  attributionMedium?: string | null;
+  attributionCampaign?: string | null;
+  isInternal?: boolean;
 }) => {
-  const { userId, name, slug } = param;
+  const {
+    userId,
+    name,
+    slug,
+    attributionSource,
+    attributionMedium,
+    attributionCampaign,
+    isInternal,
+  } = param;
 
   const team = await prisma.team.create({
     data: {
       name,
       slug,
+      attributionSource: attributionSource ?? null,
+      attributionMedium: attributionMedium ?? null,
+      attributionCampaign: attributionCampaign ?? null,
+      isInternal: isInternal ?? false,
     },
   });
 

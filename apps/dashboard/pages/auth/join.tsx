@@ -4,7 +4,7 @@ import { useRouter } from 'next/router';
 import { useSession } from 'next-auth/react';
 import { useTranslation } from 'next-i18next';
 import { GetServerSidePropsContext, InferGetServerSidePropsType } from 'next';
-import { type ReactElement, useEffect } from 'react';
+import { type ReactElement, useEffect, useState } from 'react';
 import { serverSideTranslations } from 'next-i18next/serverSideTranslations';
 
 import type { NextPageWithLayout } from 'types';
@@ -16,6 +16,10 @@ import { JoinWithInvitation, Join } from '@/components/auth';
 import Head from 'next/head';
 import { Loading } from '@/components/shared';
 import env from '@/lib/env';
+import {
+  readAttributionCookie,
+  type AttributionParams,
+} from '@/lib/relay/attributionCookie';
 
 const Signup: NextPageWithLayout<
   InferGetServerSidePropsType<typeof getServerSideProps>
@@ -24,16 +28,40 @@ const Signup: NextPageWithLayout<
   const { status } = useSession();
   const { t } = useTranslation('common');
 
-  const { error, token } = router.query as {
-    error: string;
-    token: string;
-  };
+  const { error, token, utm_source, utm_medium, utm_campaign } =
+    router.query as {
+      error: string;
+      token: string;
+      utm_source?: string;
+      utm_medium?: string;
+      utm_campaign?: string;
+    };
 
   useEffect(() => {
     if (error) {
       toast.error(t(error));
     }
   }, [error, t]);
+
+  // [RELAY-68] Channel attribution for the join POST. The join URL's own UTM query
+  // params win when present (including RELAY-70 content that links straight to
+  // /auth/join). Only when NONE of the three are present do we fall back to the
+  // first-party cookie pages/_app.tsx writes on every page load — this covers the
+  // anonymous pay-first path, where the visitor's original UTM-tagged landing page
+  // was /pricing or /, not this one. See lib/relay/attributionCookie.ts.
+  const [attribution, setAttribution] = useState<AttributionParams>({});
+
+  useEffect(() => {
+    if (utm_source || utm_medium || utm_campaign) {
+      setAttribution({ utm_source, utm_medium, utm_campaign });
+      return;
+    }
+
+    const cookie = readAttributionCookie();
+    if (cookie) {
+      setAttribution(cookie);
+    }
+  }, [utm_source, utm_medium, utm_campaign]);
 
   if (status === 'loading') {
     return <Loading />;
@@ -67,7 +95,10 @@ const Signup: NextPageWithLayout<
                 recaptchaSiteKey={recaptchaSiteKey}
               />
             ) : (
-              <Join recaptchaSiteKey={recaptchaSiteKey} />
+              <Join
+                recaptchaSiteKey={recaptchaSiteKey}
+                attribution={attribution}
+              />
             )}
           </>
         )}

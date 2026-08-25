@@ -1,7 +1,7 @@
 import { hashPassword } from '@/lib/auth';
 import { slugify } from '@/lib/server-common';
 import { sendVerificationEmail } from '@/lib/email/sendVerificationEmail';
-import { isEmailAllowed } from '@/lib/email/utils';
+import { extractEmailDomain, isEmailAllowed } from '@/lib/email/utils';
 import env from '@/lib/env';
 import { ApiError } from '@/lib/errors';
 import { createTeam, getTeam, isTeamExists } from 'models/team';
@@ -45,7 +45,21 @@ export default async function handler(
 
 // Signup the user
 const handlePOST = async (req: NextApiRequest, res: NextApiResponse) => {
-  const { name, password, team, inviteToken, recaptchaToken } = req.body;
+  const {
+    name,
+    password,
+    team,
+    inviteToken,
+    recaptchaToken,
+    // [RELAY-68] Channel attribution. Deliberately NOT destructuring `isInternal`
+    // here — that flag is computed server-side below from the verified signup
+    // email, never accepted from the request body. A self-reported boolean on a
+    // column that gates models/n8nChannelMetrics.ts's paying-customer count would
+    // be trivially spoofable by anyone POSTing to this endpoint directly.
+    attributionSource,
+    attributionMedium,
+    attributionCampaign,
+  } = req.body;
 
   await validateRecaptcha(recaptchaToken);
 
@@ -112,10 +126,26 @@ const handlePOST = async (req: NextApiRequest, res: NextApiResponse) => {
   // Create team if user is not invited
   // So we can create the team with the user as the owner
   if (!invitation) {
+    // [RELAY-68] Server-computed, never client-supplied: the ONLY input is the
+    // already-validated `email` this handler used to create the user above, matched
+    // against extractEmailDomain (lib/email/utils.ts) — the same helper already used
+    // for the free-email-domain check. isEmailAllowed's blocklist and this check are
+    // independent: a coreframe-labs.dev address is a normal work-email domain and
+    // would never fail isEmailAllowed, and the reverse — a blocked free-email
+    // provider — is never internal.
+    const isInternal = extractEmailDomain(email) === 'coreframe-labs.dev';
+
     userTeam = await createTeam({
       userId: user.id,
       name: team,
       slug: slugify(team),
+      attributionSource:
+        typeof attributionSource === 'string' ? attributionSource : null,
+      attributionMedium:
+        typeof attributionMedium === 'string' ? attributionMedium : null,
+      attributionCampaign:
+        typeof attributionCampaign === 'string' ? attributionCampaign : null,
+      isInternal,
     });
   } else {
     userTeam = await getTeam({ slug: invitation.team.slug });
