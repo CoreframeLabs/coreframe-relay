@@ -39,6 +39,9 @@ const validBody = {
   maxRetries: 5,
   status: 'ACTIVE' as const,
   ingestTokenSha256: createHash('sha256').update(TOKEN, 'utf8').digest('hex'),
+  // [RELAY-13] Required by the contract since the rate limiter's binding selection
+  // needs it. Unrelated to what this file tests, but the schema now requires it.
+  plan: 'FREE' as const,
 };
 
 describe('[RELAY-71] ingestTokenDigestHex', () => {

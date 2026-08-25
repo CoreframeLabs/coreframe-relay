@@ -1,3 +1,7 @@
+// No `.js` extension here, matching `services/routeLookup.ts`'s import of the same
+// package: the subpath does not resolve through `@coreframe-relay/types`'s `exports` map
+// (only `"."` is exposed), so this crosses the package boundary by relative path instead.
+import type { Plan } from '../../../../packages/types/src/internal';
 import type { Bindings } from '../types/bindings.js';
 
 /**
@@ -43,15 +47,52 @@ import type { Bindings } from '../types/bindings.js';
  * the author), no new npm dependency, and no external service. It is enforced by the
  * runtime at the edge and is live the moment the Worker deploys.
  *
- * What is genuinely NOT delivered by this change, and is therefore still open on the
- * ticket rather than quietly marked done:
+ * ─── [RELAY-13, 2026-08-25] PER-PLAN LIMITS, AND WHY THIS IS THREE BINDINGS ──────────
  *
- *   - Per-PLAN limits. The binding's ceiling is one number for the whole Worker. Varying
- *     it by tier needs `RouteLookupResponse` to carry the team's plan, which is a change
- *     to the dashboard contract and to the dashboard, i.e. new scope on gate day.
- *   - Changing the ceiling without a redeploy. The number lives in `wrangler.toml`, so
- *     moving it is a deploy. A deploy of this Worker is seconds, so this is a real
- *     limitation and a small one.
+ * The remaining AC on this ticket is "limits are per-plan and configurable without a
+ * redeploy". Before building anything, the platform's actual constraint was checked
+ * rather than assumed: does the Rate Limiting binding accept a caller-supplied limit or
+ * key-specific ceiling at runtime? Checked against Cloudflare's own docs — the `limit()`
+ * call takes exactly one argument, `{ key }`. No limit, no period, nothing that varies the
+ * ceiling per call. `simple.limit`/`simple.period` are fixed per binding at deploy time,
+ * full stop. Cloudflare's own documented answer for "different ceilings for different
+ * callers" is: declare multiple bindings, one per tier, and pick one in code. That is not
+ * a workaround invented here — it is the platform's only mechanism, so this is it.
+ *
+ * `RELAY_RATE_LIMITER_FREE` / `_PRO` / `_ENTERPRISE` (three separate `[[unsafe.bindings]]`
+ * entries in `wrangler.toml`) are the "small fixed set of pre-declared limiter bindings".
+ * `checkRateLimit` now takes the team's `plan` — sourced from `RouteLookupResponse.plan`,
+ * which `Team.plan` (`prisma/schema.prisma`, [RELAY-13] migration) now carries — and picks
+ * the matching binding.
+ *
+ * What THIS delivers on the AC, precisely:
+ *
+ *   - "Per-plan": real. Three tiers, three ceilings, selected by the team's actual plan
+ *     row, not a single Worker-wide number.
+ *   - "Configurable without a redeploy": real for the property that actually needs to
+ *     change often — WHICH tier a given team is on. `Team.plan` is an ordinary column;
+ *     changing it is one UPDATE (or, later, a billing webhook), and the proxy picks it up
+ *     on its next uncached lookup — at most `ROUTE_LOOKUP_CACHE_TTL_SECONDS` (30s) later —
+ *     with the Worker never touched. No `wrangler deploy` in that path at all.
+ *
+ * What this does NOT deliver, stated as plainly as the previous version of this comment
+ * stated what was missing:
+ *
+ *   - A ceiling value that changes without touching `wrangler.toml`. Each TIER's number
+ *     (600/3000/12000 per minute) still lives in `wrangler.toml` because that is the only
+ *     place Cloudflare lets it live. Moving 600 to 800 for the FREE tier is a redeploy.
+ *     This is the platform's ceiling on "without a redeploy", not a gap in this design —
+ *     see the note above; there is no lever on this binding that would let it be otherwise
+ *     without moving off the Workers Rate Limiting binding entirely (e.g. onto a
+ *     KV/Durable-Object-backed counter, which is a materially bigger change and was
+ *     rejected for the same reason the original ticket rejected KV: RELAY_KV is unbound).
+ *   - A FOURTH tier without a redeploy. Adding one is a new `[[unsafe.bindings]]` entry —
+ *     a deploy, same as adding any new binding ever is.
+ *   - Any actual mapping from a Stripe subscription to `Team.plan`. That write path
+ *     (billing integration, or an admin UI) is real, separate, future work — every team
+ *     defaults to FREE today and nothing moves it off that yet. This ticket's job was
+ *     making the LIMITER per-plan and runtime-configurable; populating `plan` from real
+ *     billing state is a different ticket's job.
  *
  * ─── WHY AN ABSENT LIMITER REFUSES THE REQUEST IN A DEPLOYED ENVIRONMENT ─────────────
  *
@@ -62,6 +103,13 @@ import type { Bindings } from '../types/bindings.js';
  * limiter is a MISCONFIGURATION and the request is refused with 503. In `development` it
  * falls open with a loud log line, because `wrangler dev` without the binding is a normal
  * state for someone editing an unrelated file and bricking that is pure friction.
+ *
+ * This still holds per-plan: a request whose plan resolves to `RELAY_RATE_LIMITER_PRO`
+ * gets refused with 503 if THAT specific binding is unbound, even if `_FREE` is present
+ * and working. There is no fallback to a different tier's binding — a fallback to a wider
+ * tier would let a misconfiguration silently grant a higher ceiling than the team is on,
+ * and a fallback to a narrower one would silently throttle a paying team harder than their
+ * plan promises. Neither is a decision this function is allowed to make quietly.
  */
 
 /**
@@ -76,9 +124,10 @@ export type RateLimiterBinding = {
 };
 
 /**
- * The window the binding is configured with in `wrangler.toml`. It is duplicated here
- * ONLY to compute `Retry-After`; the binding is the thing that enforces it. The runtime
- * accepts a period of 10 or 60 seconds and nothing else.
+ * The window every tier's binding is configured with in `wrangler.toml`. It is duplicated
+ * here ONLY to compute `Retry-After`; the binding is the thing that enforces it. The
+ * runtime accepts a period of 10 or 60 seconds and nothing else, and all three tiers share
+ * the same period (only the `limit` differs), so one constant is correct for all of them.
  */
 export const RATE_LIMIT_WINDOW_SECONDS = 60;
 
@@ -86,11 +135,26 @@ export type RateLimitDecision =
   | { ok: true }
   /** Over budget. The caller gets 429 and a `Retry-After`. */
   | { ok: false; code: 'throttled'; retryAfterSeconds: number }
-  /** Deployed with no limiter bound. The caller gets 503; this is our fault, not theirs. */
+  /** Deployed with no limiter bound for this team's plan. The caller gets 503. */
   | { ok: false; code: 'not_configured' };
 
 /**
- * Consume one unit of `teamId`'s budget.
+ * Which env binding governs each plan tier. A `Record<Plan, …>` rather than a `switch` —
+ * TypeScript then refuses to compile if `Plan` ever grows a member this map does not
+ * handle, so a new tier added to the schema without a matching `wrangler.toml` binding is
+ * a build failure here, not a silent fall-through in production.
+ */
+const BINDING_FOR_PLAN: Record<Plan, keyof Pick<
+  Bindings,
+  'RELAY_RATE_LIMITER_FREE' | 'RELAY_RATE_LIMITER_PRO' | 'RELAY_RATE_LIMITER_ENTERPRISE'
+>> = {
+  FREE: 'RELAY_RATE_LIMITER_FREE',
+  PRO: 'RELAY_RATE_LIMITER_PRO',
+  ENTERPRISE: 'RELAY_RATE_LIMITER_ENTERPRISE',
+};
+
+/**
+ * Consume one unit of `teamId`'s budget on the binding its `plan` resolves to.
  *
  * A binding that THROWS is treated as over-budget rather than under it. The alternative —
  * swallowing the error and allowing the request — means the limiter disappears exactly
@@ -98,9 +162,10 @@ export type RateLimitDecision =
  */
 export async function checkRateLimit(
   env: Bindings,
-  teamId: string
+  teamId: string,
+  plan: Plan
 ): Promise<RateLimitDecision> {
-  const limiter = env.RELAY_RATE_LIMITER;
+  const limiter = env[BINDING_FOR_PLAN[plan]];
 
   if (!limiter) {
     if (env.ENVIRONMENT === 'development') return { ok: true };

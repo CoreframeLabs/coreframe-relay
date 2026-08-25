@@ -93,6 +93,9 @@ export default async function handler(
       // down. The proxy's compare already hashed both sides to SHA-256, so it hashes the
       // presented token and compares digests: same strength, one less secret on the wire.
       ingestTokenSha256: ingestTokenDigestHex(route.ingestToken),
+      // [RELAY-13] The proxy needs this to pick which pre-declared rate-limiter binding
+      // governs the request — see PlanSchema in packages/types/src/internal.ts.
+      plan: route.team.plan,
     });
 
     // Caching is the proxy's business (ROUTE_LOOKUP_CACHE_TTL_SECONDS), but this response

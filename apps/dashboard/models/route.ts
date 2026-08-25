@@ -6,7 +6,7 @@ import {
   destinationHeaderNames,
   encryptDestinationHeaders,
 } from '@/lib/relay/destinationAuth';
-import type { Route, RouteStatus } from '@prisma/client';
+import type { Plan, Route, RouteStatus } from '@prisma/client';
 import { Prisma } from '@prisma/client';
 
 /**
@@ -114,8 +114,13 @@ export async function fetchRoute(
  * against a team it does not belong to.
  *
  * The `select` is the response contract, not a convenience. The proxy is the least
- * trusted component in the system, so it receives the five fields ingestion needs and no
- * team name, plan, or sibling route.
+ * trusted component in the system, so it receives the fields ingestion needs and no
+ * team name, member list, billing id, or sibling route.
+ *
+ * [RELAY-13] `team.plan` is the one field pulled across the Team boundary, and it is
+ * scoped to that single column rather than the whole team relation for the same reason
+ * everything else here is scoped: it is the one thing the rate limiter in
+ * `apps/proxy/src/routes/ingest.ts` needs, and no more.
  *
  * [RELAY-57] `ingestToken` is selected so the PROXY can run its constant-time digest
  * compare against the caller's path segment. Contract rationale lives on the schema in
@@ -126,10 +131,12 @@ export async function fetchRoute(
 export async function fetchRouteBySlugs(
   teamSlug: string,
   routeSlug: string
-): Promise<Pick<
-  Route,
-  'id' | 'teamId' | 'destination' | 'maxRetries' | 'status' | 'ingestToken'
-> | null> {
+): Promise<
+  | (Pick<Route, 'id' | 'teamId' | 'destination' | 'maxRetries' | 'status' | 'ingestToken'> & {
+      team: { plan: Plan };
+    })
+  | null
+> {
   // [RELAY-39 wiring] Under the combined filter, RLS on `Route` applies to the
   // Route-side of the implicit JOIN, so once `DATABASE_URL` points at
   // `relay_app` the old form returned NULL unless the ambient scope happened to
@@ -154,6 +161,7 @@ export async function fetchRouteBySlugs(
         maxRetries: true,
         status: true,
         ingestToken: true,
+        team: { select: { plan: true } },
       },
     })
   );

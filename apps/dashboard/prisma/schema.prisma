@@ -13,6 +13,20 @@ enum Role {
   MEMBER
 }
 
+/// [RELAY-13] Rate-limit / billing tier. Additive, expand-only for now: the enum has three
+/// values and every existing row defaults to FREE via the column default below, so this
+/// migration needs no backfill (contrast `ingestToken`'s migration, which DID need one
+/// because that column has no safe default). Selects which of the proxy's pre-declared
+/// Workers Rate Limiting bindings (`RELAY_RATE_LIMITER_FREE` / `_PRO` / `_ENTERPRISE` in
+/// `apps/proxy/wrangler.toml`) governs a team's ingestion ceiling — see
+/// `apps/proxy/src/middleware/rateLimit.ts` for why the binding itself cannot vary its
+/// limit per caller at runtime, which is the reason this field exists at all.
+enum Plan {
+  FREE
+  PRO
+  ENTERPRISE
+}
+
 model Account {
   id                String  @id @default(uuid())
   userId            String
@@ -77,6 +91,14 @@ model Team {
   defaultRole     Role         @default(MEMBER)
   billingId       String?
   billingProvider String?
+  /// [RELAY-13] Defaults every existing and new team to the most restrictive tier.
+  /// Nothing currently sets this to PRO/ENTERPRISE — that write path (a billing/Stripe
+  /// tier mapping or a director-operated admin action) is real future work and
+  /// deliberately out of this ticket's scope. What this column DOES already deliver: an
+  /// operator can change a team's ceiling with one UPDATE and it takes effect on the
+  /// proxy within one KV cache TTL (30s, `ROUTE_LOOKUP_CACHE_TTL_SECONDS`) with NO
+  /// Worker redeploy — which is the literal AC ("configurable without a redeploy").
+  plan            Plan         @default(FREE)
   createdAt       DateTime     @default(now())
   updatedAt       DateTime     @default(now())
   members         TeamMember[]

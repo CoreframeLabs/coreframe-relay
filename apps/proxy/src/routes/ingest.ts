@@ -283,7 +283,13 @@ export const ingest = new Hono<AppEnv>()
     }
 
     /**
-     * [RELAY-13] Per-team rate limit.
+     * [RELAY-13] Per-team, per-plan rate limit.
+     *
+     * `route.plan` is the team's rate-limit tier (`RouteLookupResponse.plan` —
+     * `packages/types/src/internal.ts`), which selects one of a small fixed set of
+     * pre-declared Cloudflare Rate Limiting bindings in `middleware/rateLimit.ts`. That
+     * file has the full reasoning for why this is three bindings rather than one number
+     * that varies per call — Cloudflare's binding does not offer a per-call ceiling.
      *
      * Position is the security property here, and it is bracketed on both sides:
      *
@@ -303,7 +309,7 @@ export const ingest = new Hono<AppEnv>()
      * Stripe, GitHub and Shopify all honour it, so a throttled webhook becomes a delayed
      * delivery rather than a lost one.
      */
-    const limit = await checkRateLimit(c.env, route.teamId);
+    const limit = await checkRateLimit(c.env, route.teamId, route.plan);
     if (!limit.ok) {
       if (limit.code === 'not_configured') {
         // Deployed with no limiter bound. Refusing is the point: a control that quietly
@@ -313,7 +319,7 @@ export const ingest = new Hono<AppEnv>()
             level: 'error',
             event: 'proxy.misconfigured',
             requestId,
-            reason: 'RELAY_RATE_LIMITER is not bound',
+            reason: `rate limiter binding for plan ${route.plan} is not bound`,
           })
         );
         return c.json({ error: 'proxy not configured', requestId }, 503);
