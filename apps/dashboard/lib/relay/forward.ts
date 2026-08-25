@@ -1,6 +1,7 @@
-// ⚠ The SSRF import below is the ONE line [RELAY-33] swaps for the shared package.
-// Read `lib/relay/ssrfGap.ts` before assuming this path is SSRF-protected — it is not.
-import { validateDestination } from '@/lib/relay/ssrfGap';
+// ⚠ [RELAY-33]: `resolveAndValidateDestination` is the DNS-RESOLVING check — literal
+// address validation plus DoH resolution of the hostname, with every resolved record
+// re-checked. Read `lib/relay/ssrfGap.ts` before touching this import.
+import { resolveAndValidateDestination } from '@/lib/relay/ssrfGap';
 import { DESTINATION_HEADER_ALLOWED_NAMES } from '@/lib/relay/destinationAuth';
 
 /**
@@ -195,6 +196,18 @@ export async function forwardToDestination(params: {
 
   /**
    * Forward-time SSRF re-check — the destination is editable between ingest and send.
+   *
+   * [RELAY-33] This calls `resolveAndValidateDestination`, not the literal-only
+   * `validateDestination` — DNS resolved on OUR side, right here, and the RESOLVED
+   * A/AAAA addresses re-checked, closing the rebinding gap `ssrf.ts`'s own header names.
+   * Position matters: this call sits IMMEDIATELY before the `fetch` below, deliberately
+   * not earlier (not at ingest, not cached from a prior check) — a hostname's record can
+   * change between any earlier check and this moment, and re-resolving here, right before
+   * the connect, is what actually closes that window rather than just moving it. See
+   * `ssrf-dns.ts` for the residual gap that remains even so (the runtime's own `fetch`
+   * re-resolves the hostname again at connect time, and nothing in a fetch-only runtime
+   * lets us pin that second resolution to the address we just validated).
+   *
    * ONE waiver, mirroring the one in apps/proxy/src/routes/ingest.ts and narrower here:
    * [RELAY-66]'s smoke test delivers into /api/relay/smoke-destination on the local
    * dashboard, which the literal-address validator correctly rejects as loopback. The
@@ -202,9 +215,11 @@ export async function forwardToDestination(params: {
    * take this path — `isTest` defaults to REAL on an unparsed envelope) and (b) the
    * destination's host is loopback with port exactly equal to the default Next.js dev
    * port (4002) — i.e. the smoke destination, not arbitrary loopback. Everything else
-   * stays rejected, now and in production.
+   * stays rejected, now and in production. The waiver constructs the URL directly and
+   * never goes through DNS resolution — loopback by name is a literal-check rejection,
+   * not a hostname that needs resolving.
    */
-  let check = validateDestination(params.destination);
+  let check = await resolveAndValidateDestination(params.destination);
   if (!check.ok && params.isTest) {
     try {
       const destUrl = new URL(params.destination);

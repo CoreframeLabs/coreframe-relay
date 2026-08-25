@@ -70,27 +70,45 @@ afterEach(() => {
  * SSRF-guarded. `ssrf.forward.spec.ts` does, against the real module, including the case
  * where a live listener is waiting and must never be reached. Delete the validator call in
  * `forward.ts` and that file goes red — this one would not. That split is why it exists.
+ *
+ * [RELAY-33] UPDATE: `forward.ts` now calls `resolveAndValidateDestination` (the
+ * DNS-resolving layer), not `validateDestination` directly — closing the DNS-rebinding
+ * gap. The override below widens BOTH functions identically, for the exact same reason
+ * and the exact same narrow scope: `resolveAndValidateDestination` runs the literal check
+ * first and would otherwise reject this suite's real `127.0.0.1` listener as loopback
+ * exactly like `validateDestination` did before this file's original double existed.
  */
 // Relative, not the `@/` alias: jest's resolver applies the alias to IMPORTS but not to
 // `jest.mock`'s hoisted specifier. Both forms resolve to the same file, so the module
 // registry entry `forward.ts` reads is the one replaced here.
 jest.mock('../../lib/relay/ssrfGap', () => {
   const actual = jest.requireActual('../../lib/relay/ssrfGap');
+
+  // The listener this file creates: literal 127.0.0.1, ephemeral port. Nothing else.
+  // Returns `null` (never widens) for anything that is not exactly that shape.
+  const loopbackOverride = (raw: string) => {
+    try {
+      const url = new URL(raw);
+      if (url.hostname === '127.0.0.1' && Number(url.port) >= 1024) {
+        return { ok: true, url };
+      }
+    } catch {
+      // A URL that will not parse stays rejected — the double never widens a failure.
+    }
+    return null;
+  };
+
   return {
     ...actual,
     validateDestination: (raw: string) => {
       const verdict = actual.validateDestination(raw);
       if (verdict.ok) return verdict;
-      try {
-        const url = new URL(raw);
-        // The listener this file creates: literal 127.0.0.1, ephemeral port. Nothing else.
-        if (url.hostname === '127.0.0.1' && Number(url.port) >= 1024) {
-          return { ok: true, url };
-        }
-      } catch {
-        // A URL that will not parse stays rejected — the double never widens a failure.
-      }
-      return verdict;
+      return loopbackOverride(raw) ?? verdict;
+    },
+    resolveAndValidateDestination: async (raw: string) => {
+      const verdict = await actual.resolveAndValidateDestination(raw);
+      if (verdict.ok) return verdict;
+      return loopbackOverride(raw) ?? verdict;
     },
   };
 });

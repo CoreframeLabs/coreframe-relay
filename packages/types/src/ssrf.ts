@@ -40,14 +40,21 @@
  * The security plan's Part 8 checklist explicitly requires "DNS resolution performed on
  * our side (not just regex on input URL)". Cloudflare Workers cannot resolve DNS directly
  * — there is no `dns` module and no raw socket. Resolution has to happen through a DNS-
- * over-HTTPS lookup (Cloudflare's own 1.1.1.1 resolver is reachable via fetch), and even
- * then a TOCTOU gap remains between our resolution and the runtime's.
+ * over-HTTPS lookup (Cloudflare's own resolver is reachable via fetch), and even then a
+ * TOCTOU gap remains between our resolution and the runtime's own connect-time lookup —
+ * see `ssrf-dns.ts` for exactly how narrow that residual gap is and why it cannot be
+ * closed further from inside a fetch-only runtime.
  *
  * So this validator is layer one of two, and it is deliberately marked as such rather than
- * quietly presented as complete. Layer two (DoH resolution + re-validation of every
- * resolved A/AAAA record, plus redirect chain validation) is tracked and MUST land before
- * launch. Treating this file as sufficient would mean shipping a control that reads as
- * "SSRF protected" while a DNS name resolving to 169.254.169.254 sails straight through.
+ * quietly presented as complete. **Layer two now exists: `./ssrf-dns.ts`'s
+ * `resolveAndValidateDestination` — DoH resolution of every A/AAAA record plus
+ * re-validation of each one through `isBlockedIPv4`/`isBlockedIPv6` below.** Redirect-chain
+ * validation is handled separately, at each call site, via `redirect: 'manual'` on the
+ * outbound fetch (see `apps/dashboard/lib/relay/forward.ts`). Treating THIS file alone as
+ * sufficient would still mean shipping a control that reads as "SSRF protected" while a
+ * DNS name resolving to 169.254.169.254 sails straight through — that is exactly why every
+ * call site is required to call `resolveAndValidateDestination`, not this file's
+ * `validateDestination` directly, wherever the result gates an actual outbound request.
  */
 
 /** Result type per relay-engineering-standards.md §5.3 — errors are values, not throws. */
@@ -61,7 +68,15 @@ export type SsrfReason =
   | 'embedded_credentials'
   | 'blocked_host'
   | 'blocked_ip'
-  | 'bad_port';
+  | 'bad_port'
+  // ─── [RELAY-33] DNS-resolution layer, added by ./ssrf-dns.ts ──────────────────────
+  // Never produced by `validateDestination` in this file — only by
+  // `resolveAndValidateDestination`, which calls this file's checks first and only adds
+  // these two outcomes for what DNS resolution itself discovers.
+  /** DoH lookup failed, timed out, or returned zero A/AAAA records. Fails closed. */
+  | 'dns_resolution_failed'
+  /** The literal address passed, but a RESOLVED A/AAAA record is in a blocked range. */
+  | 'blocked_resolved_ip';
 
 /** Hostnames that resolve inward regardless of the network we run on. */
 const BLOCKED_HOSTNAMES = new Set([
@@ -101,8 +116,14 @@ const BLOCKED_PORTS = new Set([
 
 const isDigits = (s: string) => s.length > 0 && /^[0-9]+$/.test(s);
 
-/** Parse a dotted-quad into four octets, or null if it is not one. */
-function parseIPv4(host: string): [number, number, number, number] | null {
+/**
+ * Parse a dotted-quad into four octets, or null if it is not one.
+ *
+ * Exported for `./ssrf-dns.ts`, which needs to tell "this hostname is already a literal
+ * IPv4 address, and `validateDestination` already range-checked it" apart from "this is a
+ * real hostname that needs DNS resolution" — reusing this rather than a second regex.
+ */
+export function parseIPv4(host: string): [number, number, number, number] | null {
   const parts = host.split('.');
   if (parts.length !== 4) return null;
   const nums: number[] = [];
