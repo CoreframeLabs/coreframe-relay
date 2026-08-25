@@ -113,6 +113,14 @@ The `confirm` input must exactly match `target` — a typo (`target=production`,
 `confirm=staging`) makes the `guard` job refuse the run rather than migrate the wrong
 thing quietly.
 
+**[RELAY-41 AC5]** `target=production` now ALWAYS re-runs staging first, in the same
+dispatch — the `migrate-production` job has `needs: [guard, migrate-staging]`, so it is
+structurally impossible to reach production without staging having just succeeded. The
+two-command sequence above still works exactly as shown, but it's no longer just advice:
+running `target=production` alone (skipping the first command) still runs staging first
+automatically, and a failed staging run blocks production even if you dispatch
+`target=production` directly.
+
 **What the job actually does, three steps, only the third is proof:**
 
 1. `pnpm exec prisma migrate deploy` (`apps/dashboard`) — the Prisma-tracked schema only.

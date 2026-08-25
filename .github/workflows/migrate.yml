@@ -20,13 +20,42 @@
 #
 # Manual trigger only, deliberately. No push trigger exists here — a production schema
 # change is a human decision, never a side effect of a branch merge.
+#
+# RELAY-41 AC5 (added when that gap was closed): `target=production` used to be a free
+# choice on this dispatch — nothing stopped someone picking "production" first, or
+# running it after a staging run that had actually failed. No GitHub Environment
+# protection is set up on this repo yet (a director-only Settings action, not done as of
+# the date this comment was written), so the gate is built at the workflow-graph level
+# instead of relying on Environments' required-reviewers feature:
+#
+#   - `migrate-staging` has no `if:` — it runs on every dispatch that passes `guard`,
+#     regardless of what `target` was set to.
+#   - `migrate-production` has `needs: [guard, migrate-staging]` AND
+#     `if: inputs.target == 'production'`. GitHub Actions skips a job whose `needs` job
+#     did not succeed (default behavior — no `if: always()` here, deliberately), so:
+#       - target=staging                        -> migrate-staging runs,
+#                                                   migrate-production is skipped (`if` false).
+#       - target=production, staging succeeds   -> migrate-staging runs and succeeds,
+#                                                   migrate-production runs.
+#       - target=production, staging fails      -> migrate-staging runs and fails,
+#                                                   migrate-production is skipped (needs
+#                                                   not met) — workflow ends in failure,
+#                                                   production's database is never touched.
+#   - There is structurally no path to reach migrate-production without migrate-staging
+#     having just run, in the same dispatch, immediately before it. A stale "staging
+#     passed yesterday" cannot be used to justify running production today without
+#     staging running again right now.
 name: Migrate
 
 on:
   workflow_dispatch:
     inputs:
       target:
-        description: 'Environment to migrate. Run staging first, always.'
+        description: >-
+          Environment to migrate. "staging" runs staging only. "production" ALWAYS runs
+          staging first in this same dispatch and only proceeds to production if that
+          staging run succeeds — there is no way to run production without staging
+          having just passed.
         required: true
         type: choice
         options:
@@ -39,11 +68,6 @@ on:
 
 permissions:
   contents: read
-
-concurrency:
-  # Never cancel a migration mid-flight — that is how a schema is left half-applied.
-  group: migrate-${{ inputs.target }}
-  cancel-in-progress: false
 
 jobs:
   guard:
@@ -58,15 +82,18 @@ jobs:
           fi
           echo "Confirmed: migrating ${{ inputs.target }}"
 
-  migrate:
-    name: Migrate ${{ inputs.target }}
+  migrate-staging:
+    name: Migrate staging
     needs: guard
     runs-on: ubuntu-latest
-    # A GitHub Environment named exactly "staging" or "production" must exist with its
-    # own `DATABASE_MIGRATION_URL` secret, and — for "production" — required reviewers
-    # attached. This is a one-time repo Settings action (Settings → Environments) that
-    # this file cannot perform; see docs/deploy-runbook.md step 0.
-    environment: ${{ inputs.target }}
+    # A GitHub Environment named exactly "staging" must exist with its own
+    # `DATABASE_MIGRATION_URL` secret. This is a one-time repo Settings action (Settings
+    # → Environments) that this file cannot perform; see docs/deploy-runbook.md step 0.
+    environment: staging
+    concurrency:
+      # Never cancel a migration mid-flight — that is how a schema is left half-applied.
+      group: migrate-staging
+      cancel-in-progress: false
     env:
       # RELAY-41's whole point, restated as a pipeline constraint: the migration
       # credential is NOT the app's runtime credential. This secret must be a role with
@@ -81,7 +108,7 @@ jobs:
       - name: Refuse to run with no migration credential
         run: |
           if [ -z "$DATABASE_URL" ]; then
-            echo "::error::secrets.DATABASE_MIGRATION_URL is not set for the '${{ inputs.target }}' environment. This workflow will not invent a credential — add it under Settings → Environments → ${{ inputs.target }} → Secrets, then re-run. See docs/deploy-runbook.md's env inventory."
+            echo "::error::secrets.DATABASE_MIGRATION_URL is not set for the 'staging' environment. This workflow will not invent a credential — add it under Settings → Environments → staging → Secrets, then re-run. See docs/deploy-runbook.md's env inventory."
             exit 1
           fi
 
@@ -113,7 +140,78 @@ jobs:
       - name: Record the outcome
         if: always()
         run: |
-          echo "## Migrate ${{ inputs.target }}" >> "$GITHUB_STEP_SUMMARY"
+          echo "## Migrate staging" >> "$GITHUB_STEP_SUMMARY"
+          echo "- Triggered by: ${{ github.actor }}" >> "$GITHUB_STEP_SUMMARY"
+          echo "- SHA: ${{ github.sha }}" >> "$GITHUB_STEP_SUMMARY"
+          echo "- Result: ${{ job.status }}" >> "$GITHUB_STEP_SUMMARY"
+          echo "" >> "$GITHUB_STEP_SUMMARY"
+          echo "Paste this line into the dev log per docs/deploy-runbook.md (RELAY-83's own convention: dated, in writing, not assumed)." >> "$GITHUB_STEP_SUMMARY"
+
+  migrate-production:
+    name: Migrate production
+    needs: [guard, migrate-staging]
+    if: inputs.target == 'production'
+    runs-on: ubuntu-latest
+    # A GitHub Environment named exactly "production" must exist with its own
+    # `DATABASE_MIGRATION_URL` secret and, once Environments are set up in this repo's
+    # Settings, required reviewers attached. This is a one-time repo Settings action
+    # (Settings → Environments) that this file cannot perform; see
+    # docs/deploy-runbook.md step 0. Until that Settings action happens, the guarantee
+    # that this job cannot run without a just-succeeded staging run comes from the
+    # `needs: migrate-staging` graph above, not from Environments — see the RELAY-41 AC5
+    # note at the top of this file.
+    environment: production
+    concurrency:
+      # Never cancel a migration mid-flight — that is how a schema is left half-applied.
+      group: migrate-production
+      cancel-in-progress: false
+    env:
+      # RELAY-41's whole point, restated as a pipeline constraint: the migration
+      # credential is NOT the app's runtime credential. This secret must be a role with
+      # DDL (CREATE/ALTER/DROP), separate from RELAY_APP_DATABASE_URL / the deployed
+      # app's DATABASE_URL (relay_app, granted NO DDL by 20260804120000_relay_app_login_and_grants.sql).
+      # Prisma only ever reads env("DATABASE_URL") from schema.prisma — there is no
+      # separate Prisma-native variable name for this — so this step-scoped export is
+      # how the two stay distinct in GitHub's secret store while satisfying Prisma's
+      # fixed variable name at the shell level, and only for the duration of this job.
+      DATABASE_URL: ${{ secrets.DATABASE_MIGRATION_URL }}
+    steps:
+      - name: Refuse to run with no migration credential
+        run: |
+          if [ -z "$DATABASE_URL" ]; then
+            echo "::error::secrets.DATABASE_MIGRATION_URL is not set for the 'production' environment. This workflow will not invent a credential — add it under Settings → Environments → production → Secrets, then re-run. See docs/deploy-runbook.md's env inventory."
+            exit 1
+          fi
+
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: pnpm
+
+      - run: pnpm install --frozen-lockfile
+
+      - name: Show pending Prisma migrations (informational — not a gate)
+        working-directory: apps/dashboard
+        run: pnpm exec prisma migrate status || true
+
+      - name: prisma migrate deploy — Prisma-tracked schema ONLY (RLS is the next step)
+        working-directory: apps/dashboard
+        run: pnpm exec prisma migrate deploy
+
+      - name: supabase db push — the RLS migration, as its own step
+        run: pnpm exec supabase db push --db-url "$DATABASE_URL"
+
+      - name: Verify RLS by direct query — never trust an exit code for this
+        run: bash apps/dashboard/scripts/verify-rls.sh "$DATABASE_URL"
+
+      - name: Record the outcome
+        if: always()
+        run: |
+          echo "## Migrate production" >> "$GITHUB_STEP_SUMMARY"
           echo "- Triggered by: ${{ github.actor }}" >> "$GITHUB_STEP_SUMMARY"
           echo "- SHA: ${{ github.sha }}" >> "$GITHUB_STEP_SUMMARY"
           echo "- Result: ${{ job.status }}" >> "$GITHUB_STEP_SUMMARY"
