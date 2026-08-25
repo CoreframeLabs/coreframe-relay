@@ -161,6 +161,19 @@ From your team's Buffer → Routes page, click **New Route**. It's a 3-step wiza
    secret. If it ever leaks, you can rotate it from the Routes table, which invalidates
    the old URL immediately.
 
+### 3.5. Send a test webhook before you touch production traffic
+
+Before you repoint anything real at this URL, find your new route in Buffer → Routes
+and click **Send test**. It fires a synthetic webhook through this exact ingest URL —
+not a mock — and polls the delivery log until the row appears, tagged **TEST** so it's
+excluded from billing and never confused with real traffic. You can send it straight to
+your n8n destination, or use the "send to the built-in catcher" option if you haven't
+finished wiring your n8n workflow yet.
+
+Watching that row go from QUEUED to DELIVERED (or DLQ, if the destination isn't reachable
+yet) is the fastest way to confirm the pipeline actually works before you point a real
+Stripe or Shopify webhook at a URL that has never carried a single request.
+
 ### 4. Repoint your webhook source at the Relay URL — not at n8n
 
 This is the step that actually does the work, and it's the opposite direction of what

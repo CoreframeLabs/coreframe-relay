@@ -35,6 +35,13 @@ to be redone.
 
 ## Install
 
+> **Not published yet.** This package is not yet on the npm registry —
+> `registry.npmjs.org/n8n-nodes-relay` currently 404s, and the Community Nodes install
+> path below will fail until it is published. The instructions are correct for once
+> publishing happens; there's nothing to install today. If you need Relay in front of an
+> n8n webhook right now, use the general route flow instead — no node required:
+> [docs/integrations/n8n.md](https://github.com/CoreframeLabs/coreframe-relay/blob/main/docs/integrations/n8n.md).
+
 Community node install via the n8n UI: **Settings → Community Nodes → Install**, package
 name `n8n-nodes-relay`. Self-hosted instances can also install it with:
 

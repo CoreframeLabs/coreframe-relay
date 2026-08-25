@@ -12,6 +12,7 @@ import {
 } from '@/components/ui/dialog';
 import { CopyableUrl } from './CopyableUrl';
 import { DestinationHeadersEditor, type HeaderDraft } from './DestinationHeadersEditor';
+import { SendTestButton } from './SendTestButton';
 import type { RouteRow } from './RoutesTable';
 
 /**
@@ -279,6 +280,16 @@ export function NewRouteWizard({
               none of them need to set a custom header. If it leaks, rotate it from the
               Routes table; the old URL stops working immediately.
             </p>
+            <div className="relative rounded-lg border border-dashed p-3">
+              <p className="mb-2 text-xs text-muted-foreground">
+                Before pointing a real sender at this URL, confirm the pipeline works:
+              </p>
+              <SendTestButton
+                routeId={created.id}
+                teamSlug={teamSlug}
+                routeName={created.name}
+              />
+            </div>
           </div>
         )}
 

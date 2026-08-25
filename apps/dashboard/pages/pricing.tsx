@@ -182,37 +182,57 @@ const PricingPage: NextPageWithLayout = () => {
 
             <div className="mt-6 border-t border-landing-border pt-5">
               {paymentLinkUrl ? (
-                <a
-                  href={paymentLinkUrl}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className={`inline-flex w-full items-center justify-center gap-2 rounded-md bg-landing-accent px-5 py-3 text-sm font-semibold text-landing-accent-ink transition-colors hover:bg-landing-accent-hover ${focusRing}`}
-                >
-                  Pay with Stripe
-                  <ArrowTopRightOnSquareIcon className="h-4 w-4" aria-hidden="true" />
-                </a>
+                <>
+                  <a
+                    href={paymentLinkUrl}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className={`inline-flex w-full items-center justify-center gap-2 rounded-md bg-landing-accent px-5 py-3 text-sm font-semibold text-landing-accent-ink transition-colors hover:bg-landing-accent-hover ${focusRing}`}
+                  >
+                    Pay with Stripe
+                    <ArrowTopRightOnSquareIcon className="h-4 w-4" aria-hidden="true" />
+                  </a>
+                  <p className="mt-3 text-xs text-landing-secondary">
+                    Sign up with the same email you use to pay — that&rsquo;s
+                    how we connect your account automatically.
+                  </p>
+                  <p className="mt-3 font-mono text-[11px] text-landing-muted">
+                    This checkout is live — it&rsquo;s just running in Stripe
+                    test mode today, so a real card will be declined. See
+                    the{' '}
+                    <Link href="/terms" className={extLinkClass}>
+                      Terms
+                    </Link>{' '}
+                    and{' '}
+                    <Link href="/refund-policy" className={extLinkClass}>
+                      Refund Policy
+                    </Link>
+                    .
+                  </p>
+                </>
               ) : (
-                <p className="text-sm text-landing-muted">
-                  Payment link isn&rsquo;t configured in this environment.
-                  Email{' '}
-                  <a href={`mailto:${CONTACT_EMAIL}`} className={extLinkClass}>
-                    {CONTACT_EMAIL}
-                  </a>{' '}
-                  instead.
-                </p>
+                <>
+                  <p className="text-sm text-landing-muted">
+                    Payment link isn&rsquo;t configured in this environment.
+                    Email{' '}
+                    <a href={`mailto:${CONTACT_EMAIL}`} className={extLinkClass}>
+                      {CONTACT_EMAIL}
+                    </a>{' '}
+                    instead.
+                  </p>
+                  <p className="mt-3 font-mono text-[11px] text-landing-muted">
+                    See the{' '}
+                    <Link href="/terms" className={extLinkClass}>
+                      Terms
+                    </Link>{' '}
+                    and{' '}
+                    <Link href="/refund-policy" className={extLinkClass}>
+                      Refund Policy
+                    </Link>
+                    .
+                  </p>
+                </>
               )}
-              <p className="mt-3 font-mono text-[11px] text-landing-muted">
-                Stripe test mode today — a real card will be declined. See
-                the{' '}
-                <Link href="/terms" className={extLinkClass}>
-                  Terms
-                </Link>{' '}
-                and{' '}
-                <Link href="/refund-policy" className={extLinkClass}>
-                  Refund Policy
-                </Link>
-                .
-              </p>
             </div>
           </Card>
 
