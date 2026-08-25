@@ -79,6 +79,12 @@ const unAuthenticatedRoutes = [
   // route-lookup by constant-time bearer comparison against RELAY_API_SECRET, qstash by
   // QStash's request signature, both before touching any data.
   '/api/relay/internal/route-lookup',
+  // [RELAY-68] Internal n8n-channel metrics reporting endpoint — same reasoning as
+  // route-lookup.ts above (a non-browser caller authenticating itself via
+  // RELAY_API_SECRET, not a NextAuth session) and same exact-path-not-wildcard
+  // discipline: /api/relay/internal/* would silently un-authenticate any future
+  // file dropped into that directory.
+  '/api/relay/internal/n8n-channel-metrics',
   '/api/relay/qstash',
   // [RELAY-50] The catcher is a per-route webhook receiver, and its whole point is
   // reachable from the browser for a user who has not yet wired a destination. The URL

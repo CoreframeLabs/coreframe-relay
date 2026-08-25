@@ -99,6 +99,27 @@ model Team {
   /// proxy within one KV cache TTL (30s, `ROUTE_LOOKUP_CACHE_TTL_SECONDS`) with NO
   /// Worker redeploy — which is the literal AC ("configurable without a redeploy").
   plan            Plan         @default(FREE)
+  /// [RELAY-68] n8n-wedge channel attribution, captured at signup time.
+  /// `attributionSource`/`Medium`/`Campaign` mirror the UTM params on the join URL
+  /// (`pages/auth/join.tsx` → `pages/api/auth/join.ts` → `createTeam` in
+  /// `models/team.ts`), or a first-party cookie fallback for the anonymous pay-first
+  /// path (`pages/pricing.tsx`'s Payment Link has no `client_reference_id` — see
+  /// `lib/relay/attributionCookie.ts`). NULL for every team created before this
+  /// ticket and for any signup that carries no UTM params at all — "unknown" is
+  /// represented as NULL, never as a manufactured allowlist value, because
+  /// `models/n8nChannelMetrics.ts` counts against a fixed 6-value allowlist and a
+  /// fabricated default would silently inflate that count.
+  attributionSource   String?
+  attributionMedium   String?
+  attributionCampaign String?
+  /// [RELAY-68] True when the signup email's domain is `coreframe-labs.dev`,
+  /// computed server-side ONLY in `pages/api/auth/join.ts` (never client-supplied —
+  /// a self-reported boolean on a metrics-gating column would be trivially spoofable
+  /// by anyone hitting the join API directly). Excludes internal/dogfooding teams
+  /// from `models/n8nChannelMetrics.ts`'s paying-customer and MRR counts. `false` is
+  /// the correct default for every existing row: this check did not exist before
+  /// this ticket, so no historical team was ever evaluated against it.
+  isInternal          Boolean      @default(false)
   createdAt       DateTime     @default(now())
   updatedAt       DateTime     @default(now())
   members         TeamMember[]
