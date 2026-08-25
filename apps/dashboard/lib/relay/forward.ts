@@ -12,8 +12,44 @@ import { DESTINATION_HEADER_ALLOWED_NAMES } from '@/lib/relay/destinationAuth';
  * URL, we supply the network position. Three controls sit here.
  */
 
-/** Default forward timeout. Overridable per environment; see the note on the timeout below. */
-const DEFAULT_TIMEOUT_MS = 10_000;
+/**
+ * Default forward timeout. Overridable per environment; see the note on the timeout below.
+ *
+ * [RELAY-111] Was 10_000. That number undercut the destination type this product is
+ * actively sold against: `docs/integrations/n8n.md` tells buyers n8n Cloud enforces its
+ * own hard 100-second Cloudflare timeout on webhook responses, meaning n8n workflows
+ * legitimately run for tens of seconds. At 10s, Relay aborted and recorded FAILED/DLQ on
+ * a workflow n8n itself would have let finish — the product's own core promise
+ * (durable, retried delivery) actively working against the exact buyer it targets.
+ *
+ * 110_000 (110s) is chosen deliberately just past n8n's documented 100s ceiling, not
+ * arbitrarily longer:
+ *   - Long enough that a legitimate n8n workflow finishing anywhere up to 100s gets a
+ *     real answer instead of an aborted one.
+ *   - Short enough that if n8n's OWN Cloudflare timeout has already fired (its 524),
+ *     Relay's fetch receives that 524 as an honest non-2xx response shortly after 100s,
+ *     rather than raced by our own synthetic AbortError first — a real response beats a
+ *     manufactured timeout for whoever reads `failReason` later.
+ *   - Not "as long as possible": every second held open here is a held serverless
+ *     invocation, and this value is a deliberate ceiling, not a default nobody chose.
+ *
+ * This is safe against BOTH platform ceilings that could otherwise kill the request out
+ * from under this timeout:
+ *   - Vercel: this project runs pages/api routes as Node.js Functions under Fluid
+ *     compute (default since 2025-04-23, and this project postdates that). Fluid
+ *     compute's Hobby-plan default AND max duration is 300s — see the explicit
+ *     `maxDuration` set in `pages/api/relay/qstash.ts`, which pins this in code rather
+ *     than trusting an account-level default that could change. 110s forward + DB
+ *     writes fits comfortably inside 300s.
+ *   - QStash: "Max HTTP Response Duration" is 15 minutes even on the free plan — the
+ *     consumer invocation is never killed by QStash before Vercel's own ceiling would
+ *     apply first.
+ *
+ * `RELAY_FORWARD_TIMEOUT_MS` can still override this per environment; keep any override
+ * under `maxDuration` in `pages/api/relay/qstash.ts` (see the note there) or the
+ * invocation is killed before the failure can be written to `DeliveryLog`.
+ */
+const DEFAULT_TIMEOUT_MS = 110_000;
 
 /**
  * Headers that must never reach a customer destination.
@@ -123,6 +159,40 @@ export function destinationHeadersToSend(
     out[name] = value;
   }
   return out;
+}
+
+/**
+ * [RELAY-111] Duck-typed on purpose, NOT `error instanceof Error` /
+ * `error instanceof DOMException`.
+ *
+ * A `fetch` abort throws a `DOMException` named `AbortError`. `instanceof` checks that
+ * value against the constructor visible in the CALLING module's realm, and a fetch
+ * implementation is not guaranteed to construct its error in that same realm — this is
+ * exactly the case observed writing RELAY-111's own test suite: Jest's per-test-file VM
+ * sandboxing gives `forward.ts` its own `Error`, while Node's global `fetch` throws a
+ * `DOMException` constructed in the outer realm. The two are the same kind of object by
+ * every property that matters and fail `instanceof` anyway, which silently turned every
+ * timeout's `failReason` into `request failed (unknown)` instead of the honest
+ * `destination timed out after Xms` — undermining the one signal an operator (or a
+ * future alert) would use to tell "destination genuinely slow" from "connection
+ * refused". Checking `.name` is realm-agnostic and is what fetch/abort consumers rely on
+ * in practice.
+ */
+function isAbortError(error: unknown): boolean {
+  return (
+    typeof error === 'object' &&
+    error !== null &&
+    (error as { name?: unknown }).name === 'AbortError'
+  );
+}
+
+/** Same realm-agnostic reasoning as `isAbortError` above, for the generic fallback case. */
+function errorName(error: unknown): string {
+  if (typeof error === 'object' && error !== null && 'name' in error) {
+    const name = (error as { name?: unknown }).name;
+    if (typeof name === 'string' && name) return name;
+  }
+  return 'unknown';
 }
 
 export type ForwardOutcome = {
@@ -292,7 +362,7 @@ export async function forwardToDestination(params: {
     };
   } catch (error) {
     const latencyMs = Date.now() - startedAt;
-    const aborted = error instanceof Error && error.name === 'AbortError';
+    const aborted = isAbortError(error);
 
     return {
       ok: false,
@@ -302,7 +372,7 @@ export async function forwardToDestination(params: {
         ? `destination timed out after ${timeoutMs}ms`
         : // Error *name* only, never the message: a fetch error message can carry the
           // full destination URL, which may itself embed a token in a query string.
-          `request failed (${error instanceof Error ? error.name : 'unknown'})`,
+          `request failed (${errorName(error)})`,
     };
   } finally {
     clearTimeout(timer);

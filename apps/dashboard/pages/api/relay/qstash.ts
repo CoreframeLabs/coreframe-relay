@@ -42,6 +42,16 @@ export const config = {
     // Required. See point 1 above — without this the signature can never verify.
     bodyParser: false,
   },
+  // [RELAY-111] Explicit, not relied-upon-by-default. `forward.ts`'s DEFAULT_TIMEOUT_MS
+  // is 110s (see the note there) to respect n8n's documented 100s ceiling. This function
+  // must be allowed to run at least that long plus overhead for the SSRF re-check and the
+  // DeliveryLog/DlqItem writes, or Vercel kills the invocation before `forwardToDestination`
+  // can even reach its own abort — turning a clean, measured timeout into a silent function
+  // kill with no DeliveryLog row at all. 120s gives ~10s of headroom above the 110s forward
+  // budget. This is comfortably under the Fluid-compute Hobby/Pro default+max of 300s, so
+  // it does not require a platform upgrade — but it is pinned explicitly here rather than
+  // left to inherit whatever the account-level default happens to be today.
+  maxDuration: 120,
 };
 
 /** QStash sets this to the number of retries ALREADY performed: 0 on the first attempt. */

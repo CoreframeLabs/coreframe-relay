@@ -49,8 +49,40 @@ not fix:
 |---|---|---|
 | Webhooks randomly stop firing, need a manual toggle | **Yes, the consequence.** | Relay receives the request first. While n8n's listener is down, the payload sits safely in Relay, gets retried with backoff, and lands in the DLQ (visible, manually replayable) if n8n never answers — instead of vanishing. |
 | API-activation never registers the webhook path (#21614) | **No.** Relay can't register n8n's own listener. | Instead of a silently dead webhook, requests show up in Relay's delivery log as RETRYING → DLQ against a destination that keeps refusing. You get a real, timestamped failure signal instead of nothing. |
-| n8n Cloud's 100-second Cloudflare timeout | **Yes, for the sender's side.** | Relay acknowledges the sender in milliseconds and forwards asynchronously. Stripe/Shopify never see n8n's processing time — they see Relay's ack. If n8n itself then times out on Relay's forward, that attempt becomes a RETRYING/DLQ item Relay keeps retrying, rather than the sender's own delivery attempt failing outright. |
+| n8n Cloud's 100-second Cloudflare timeout | **Yes, for the sender's side.** | Relay acknowledges the sender in milliseconds and forwards asynchronously. Stripe/Shopify never see n8n's processing time — they see Relay's ack. Relay's own forward to n8n waits up to 110 seconds before giving up — deliberately just past n8n's documented 100-second ceiling, so a workflow that legitimately takes n8n's full window still gets a real answer instead of being marked failed early. If n8n itself then times out (its own 524) or Relay's 110s forward window elapses first, that attempt becomes a RETRYING/DLQ item Relay keeps retrying, rather than the sender's own delivery attempt failing outright. See the duplicate-delivery note below before you rely on that retry against a slow workflow. |
 | Production webhook always returns 200 OK with nothing registered (#16339) | **No — and this is the sharpest limit.** | If n8n accepts Relay's forwarded request and answers 200 while doing nothing, Relay's delivery log will honestly show DELIVERED, because that's what happened at the HTTP layer. Relay can prove "we handed this to n8n and n8n said OK." It cannot prove n8n's workflow actually ran. |
+
+**Duplicate delivery against a slow workflow.** Relay's delivery guarantee is
+at-least-once, not exactly-once — the same promise made on the landing page's "What
+Founding Access doesn't include yet" section — and a slow n8n workflow is exactly where
+that matters most. If your workflow takes close to n8n's own 100-second ceiling to finish,
+and Relay's 110-second forward window elapses (or n8n answers slowly enough that the
+retry backoff schedule fires again) before n8n's response comes back, Relay has no way to
+know whether n8n actually finished your workflow — only that it didn't answer in time. The
+next retry POSTs the same event to n8n again, and if the first invocation was still
+running (or had run to completion but the response was lost), your workflow now runs
+**twice** for one event. This is not hypothetical for a Stripe- or Shopify-backed
+workflow: a duplicated event there is a duplicated refund, a duplicated fulfilment, or a
+duplicated message.
+
+Two things reduce this risk, and the second is the one that actually removes it:
+
+- **Make the workflow idempotent**, keyed on the event id (Stripe's `id`, Shopify's
+  `X-Shopify-Webhook-Id`, or Relay's own `relay-request-id` header, which rides every
+  attempt — including retries — so every duplicate is identifiable even without a
+  vendor id).
+- **Set the Webhook trigger node's "Respond" option to "Immediately"** instead of "When
+  Last Node Finishes", if your workflow doesn't need to return data computed during the
+  run. This decouples the HTTP response Relay sees from how long your workflow actually
+  takes to run: n8n answers Relay in milliseconds regardless of workflow length, Relay
+  records DELIVERED immediately, and no retry has a reason to fire against a workflow
+  that is still executing. Note this is a narrower fix than n8n's own documented
+  workaround for the 524 timeout itself — their guide recommends splitting a genuinely
+  long-running process into two webhooks (one to start the work and ack immediately, a
+  second to poll for the result) rather than just changing the respond mode. "Respond
+  Immediately" removes Relay's duplicate-delivery risk either way, but if your workflow
+  can itself exceed n8n's 100-second ceiling, follow n8n's own two-webhook pattern for
+  that part.
 
 **Not covered at all:** WhatsApp/Meta's webhook verification handshake (`hub.mode`,
 `hub.challenge`, `hub.verify_token`) is a separate, well-documented n8n pain point, but
