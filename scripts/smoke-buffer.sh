@@ -324,8 +324,16 @@ pass "no second DLQ entry — exactly 1 item for $DLQ_REQ_ID after the retry (de
 
 # ── STEP 10 — DB proof ──────────────────────────────────────────────────────
 banner 10 "direct-DB proof — rowcounts + the retry audit row"
-if [ "$HAVE_PSQL" -eq 0 ]; then
-  warn "psql absent — skipping direct SQL (steps 5–9 already prove the rows via API)"
+# DATABASE_URL_LINE is only ever set in the `local` branch above (read from
+# apps/dashboard/.env) — remote mode has no local .env to read a DB URL from,
+# and this step's own queries assume a direct connection that only makes sense
+# against the local stack (see the "against the LOCAL db" error text below,
+# unchanged). Guarding on DEPLOY here too, not just HAVE_PSQL, is the fix:
+# without it, `set -u` makes an unset $DATABASE_URL_LINE a hard crash in
+# remote mode whenever psql happens to be on PATH — found 2026-08-25 by
+# reading the code, not by triggering it live against production.
+if [ "$HAVE_PSQL" -eq 0 ] || [ "$DEPLOY" != local ]; then
+  warn "psql absent or deploy mode=$DEPLOY (not local) — skipping direct SQL (steps 5–9 already prove the rows via API)"
 else
   COUNTS="$(psql "$DATABASE_URL_LINE" -t -A -F'|' -c \
     "select (select count(*) from \"DeliveryLog\" where \"routeId\"='$ROUTE_ID'),
