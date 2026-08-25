@@ -9,7 +9,8 @@ import {
   getBySubscriptionId,
   updateStripeSubscription,
 } from 'models/subscription';
-import { getByCustomerId, getTeam, updateTeam } from 'models/team';
+import { getByCustomerId, getTeam, getTeams, updateTeam } from 'models/team';
+import { prisma } from '@/lib/prisma';
 
 export const config = {
   api: {
@@ -100,7 +101,11 @@ export default async function POST(req: NextApiRequest, res: NextApiResponse) {
 // `customer.subscription.created` arrives (Stripe fires it automatically for
 // a Payment Link using a recurring price). Re-running with the same session is
 // idempotent — updateTeam just writes the same billingId again.
-async function handleCheckoutSessionCompleted(event: Stripe.Event) {
+// Exported for direct unit testing (__tests__/api/webhooks/stripe.test.ts) — this
+// function's branching logic is what's under test, not Stripe's own signature
+// verification, so the test calls it directly rather than plumbing a signed request
+// through the full POST handler.
+export async function handleCheckoutSessionCompleted(event: Stripe.Event) {
   const session = event.data.object as Stripe.Checkout.Session;
   const teamId = session.client_reference_id;
   const customerId =
@@ -108,23 +113,103 @@ async function handleCheckoutSessionCompleted(event: Stripe.Event) {
       ? session.customer
       : session.customer?.id;
 
-  if (!teamId || !customerId) {
-    // Not a Relay-initiated Payment Link checkout (no client_reference_id) —
-    // nothing to link. Other Checkout Sessions (e.g. the in-app flow) already
-    // set billingId for themselves before the session is even created.
+  if (!customerId) {
+    // Stripe always sets `customer` on a completed subscription Checkout Session
+    // (the whole point of a subscription is a customer to bill again) — this branch
+    // is defensive, not a real path, but there is nothing to link without it.
     return;
   }
 
-  let team;
-  try {
-    team = await getTeam({ id: teamId });
-  } catch {
-    // client_reference_id didn't resolve to a real team (stale/tampered link)
-    // — ignore rather than throw, so a bad param can't fail the webhook.
+  if (teamId) {
+    // The known-good path: an authenticated Team's own billing page rendered this
+    // link with client_reference_id (components/billing/N8nWedgePaymentLink.tsx).
+    let team;
+    try {
+      team = await getTeam({ id: teamId });
+    } catch {
+      // client_reference_id didn't resolve to a real team (stale/tampered link) —
+      // ignore rather than throw, so a bad param can't fail the webhook. Falls
+      // through to the email-match path below rather than returning outright, in
+      // case the same checkout can still be linked by the payer's email.
+    }
+    if (team) {
+      await updateTeam(team.slug, {
+        billingId: customerId,
+        billingProvider: 'stripe',
+      });
+      return;
+    }
+  }
+
+  // [2026-08-25, found by the business-review checkpoint] The PUBLIC /pricing page's
+  // Payment Link (pages/pricing.tsx) deliberately does NOT set client_reference_id —
+  // there is no logged-in team to attach it to, the whole point of that page is
+  // selling to a stranger who has never signed up. Before this fix, that checkout
+  // completed, Stripe took the customer's card, and this handler returned here doing
+  // nothing: a real paying customer with no product access, silently.
+  //
+  // Fix, scoped to what can be done safely without inventing a new account-creation
+  // flow: Stripe Checkout always collects an email for a subscription, even from an
+  // anonymous Payment Link. If that email already belongs to a Relay user with
+  // exactly one team, and that team has no billingId yet, link it — the same outcome
+  // as the authenticated path, just reached by email instead of a session claim.
+  // Two cases are deliberately NOT auto-resolved, because guessing would be worse
+  // than a clear miss: a user who belongs to more than one team (ambiguous which one
+  // paid), and an email with no matching user at all (a genuinely new customer who
+  // paid before ever creating an account — there is no team to link to yet). Both
+  // are logged with full detail via console.error's own established audit-of-last-
+  // resort pattern (matching lib/audit.ts's recordAuditEvent) so they surface in
+  // Vercel's runtime logs — actively checked after every deploy this session — for
+  // manual reconciliation, rather than vanishing. A durable pending-payment table for
+  // the true auto-provisioning case is real, larger follow-up work, not squeezed in
+  // here.
+  const email = session.customer_details?.email ?? session.customer_email;
+  if (!email) {
+    console.error(
+      JSON.stringify({
+        level: 'error',
+        event: 'stripe.checkout_unlinked',
+        reason: 'no_email',
+        sessionId: session.id,
+        customerId,
+      })
+    );
     return;
   }
 
-  await updateTeam(team.slug, {
+  const user = await prisma.user.findUnique({ where: { email } });
+  if (!user) {
+    console.error(
+      JSON.stringify({
+        level: 'error',
+        event: 'stripe.checkout_unlinked',
+        reason: 'no_matching_user',
+        sessionId: session.id,
+        customerId,
+        email,
+      })
+    );
+    return;
+  }
+
+  const teams = await getTeams(user.id);
+  if (teams.length !== 1) {
+    console.error(
+      JSON.stringify({
+        level: 'error',
+        event: 'stripe.checkout_unlinked',
+        reason: teams.length === 0 ? 'user_has_no_team' : 'user_has_multiple_teams',
+        sessionId: session.id,
+        customerId,
+        email,
+        userId: user.id,
+        teamCount: teams.length,
+      })
+    );
+    return;
+  }
+
+  await updateTeam(teams[0].slug, {
     billingId: customerId,
     billingProvider: 'stripe',
   });
