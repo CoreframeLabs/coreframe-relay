@@ -122,7 +122,12 @@ function candidateIdentifiers(callText: string): string[] {
   const identifiers: string[] = [];
 
   // Template-literal interpolations: `${identifier}` or `${obj.identifier}`.
-  for (const m of callText.matchAll(/\$\{\s*([a-zA-Z0-9_.]+)\s*\}/g)) {
+  // `Array.from(...)`, not a direct `for...of` over `matchAll` -- this repo's
+  // tsconfig target predates native iterator support for `RegExpStringIterator`
+  // (TS2802 under `tsc --noEmit`), even though ts-jest's own transpilation is fine
+  // with it at test-run time. Array.from sidesteps the iterator protocol issue
+  // without touching the shared tsconfig.
+  for (const m of Array.from(callText.matchAll(/\$\{\s*([a-zA-Z0-9_.]+)\s*\}/g))) {
     identifiers.push(m[1]);
   }
 
@@ -130,17 +135,17 @@ function candidateIdentifiers(callText: string): string[] {
   //   { token }              -> shorthand, identifier is "token"
   //   { token: someVar }     -> identifier is "someVar" (the value, not the key)
   //   { token: someVar.raw } -> identifier is "someVar.raw"
-  for (const m of callText.matchAll(
-    /([a-zA-Z0-9_]+)\s*:\s*([a-zA-Z0-9_.]+)\s*[,}]/g
+  for (const m of Array.from(
+    callText.matchAll(/([a-zA-Z0-9_]+)\s*:\s*([a-zA-Z0-9_.]+)\s*[,}]/g)
   )) {
     identifiers.push(m[2]);
   }
-  for (const m of callText.matchAll(/[{,]\s*([a-zA-Z0-9_]+)\s*[,}]/g)) {
+  for (const m of Array.from(callText.matchAll(/[{,]\s*([a-zA-Z0-9_]+)\s*[,}]/g))) {
     identifiers.push(m[1]);
   }
 
   // Bare identifier arguments: console.log(someSecret)
-  for (const m of callText.matchAll(/\(\s*([a-zA-Z0-9_.]+)\s*[,)]/g)) {
+  for (const m of Array.from(callText.matchAll(/\(\s*([a-zA-Z0-9_.]+)\s*[,)]/g))) {
     identifiers.push(m[1]);
   }
 
