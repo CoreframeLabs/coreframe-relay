@@ -24,6 +24,26 @@ const config: PlaywrightTestConfig = {
       use: { ...devices['Desktop Chrome'] },
       dependencies: ['setup'],
     },
+    /**
+     * Consumer-journey E2E — a browser-level walk through signup → login → route
+     * creation → test webhook → delivery log → DLQ → sign-out, using the real UI a
+     * cold visitor sees (no API-shortcut setup). Deliberately NOT wired to the
+     * `setup`/`cleanup db` project pair above: that pair signs up one fixed
+     * jackson@example.com user and its teardown runs unscoped
+     * `prisma.user.deleteMany()` / `team.deleteMany()` — a blanket wipe of every
+     * Team/User row in the local DB, appropriate for the SSO/settings suites' one
+     * static fixture user but wrong for a suite that creates unique, timestamped
+     * throwaway data on every run and cleans up ONLY what it created (see
+     * `consumer-journey/support/cleanup.ts`). Run in isolation with:
+     *   npx playwright test --project=consumer-journey
+     */
+    {
+      name: 'consumer-journey',
+      testDir: './tests/e2e/consumer-journey',
+      testMatch: '**/*.spec.ts',
+      use: { ...devices['Desktop Chrome'] },
+      retries: 0,
+    },
   ],
   reporter: 'html',
   webServer: {
