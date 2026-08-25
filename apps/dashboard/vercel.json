@@ -1,3 +1,9 @@
 {
-  "regions": ["lhr1"]
+  "regions": ["lhr1"],
+  "crons": [
+    {
+      "path": "/api/relay/internal/dlq-health-check",
+      "schedule": "0 9 * * *"
+    }
+  ]
 }
