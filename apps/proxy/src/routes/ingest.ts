@@ -40,6 +40,20 @@ import type { AppEnv } from '../types/bindings.js';
 export const MAX_BODY_BYTES = 1_048_576; // 1 MiB
 
 /**
+ * [RELAY-12] Resolves the effective body-size cap for this environment. `RELAY_MAX_BODY_BYTES`
+ * is an optional per-environment override (bytes, positive integer); anything absent, empty,
+ * non-numeric, non-integer, or <= 0 falls back to `MAX_BODY_BYTES` rather than disabling the
+ * cap — a malformed env value must never widen the floor this constant exists to guarantee.
+ */
+export function resolveMaxBodyBytes(env: { RELAY_MAX_BODY_BYTES?: string }): number {
+  const raw = env.RELAY_MAX_BODY_BYTES;
+  if (!raw) return MAX_BODY_BYTES;
+  const parsed = Number(raw);
+  if (!Number.isInteger(parsed) || parsed <= 0) return MAX_BODY_BYTES;
+  return parsed;
+}
+
+/**
  * Headers that must never be replayed to a customer destination.
  *
  * Denylist, not allowlist, and that direction is deliberate: webhook signatures live on
@@ -418,10 +432,11 @@ export const ingest = new Hono<AppEnv>()
     const relayEvent = c.req.header('x-relay-event')?.trim().toLowerCase();
     const isTest = relayEvent === 'test';
 
-    const read = await readBodyWithLimit(c.req.raw, MAX_BODY_BYTES);
+    const maxBodyBytes = resolveMaxBodyBytes(c.env);
+    const read = await readBodyWithLimit(c.req.raw, maxBodyBytes);
     if (!read.ok) {
-      log('proxy.ingest.body_too_large', { requestId, routeId: route.routeId, limit: MAX_BODY_BYTES });
-      return c.json({ error: 'payload too large', requestId, maxBytes: MAX_BODY_BYTES }, 413);
+      log('proxy.ingest.body_too_large', { requestId, routeId: route.routeId, limit: maxBodyBytes });
+      return c.json({ error: 'payload too large', requestId, maxBytes: maxBodyBytes }, 413);
     }
 
     const candidate: RelayEnvelope = {

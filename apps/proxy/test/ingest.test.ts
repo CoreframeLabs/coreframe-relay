@@ -6,7 +6,7 @@ import { RelayEnvelopeSchema } from '@coreframe-relay/types';
 import app from '../src/index.js';
 import { RATE_LIMIT_WINDOW_SECONDS } from '../src/middleware/rateLimit.js';
 import { RELAY_KEY_HEADER, timingSafeEqualStrings } from '../src/middleware/relayKey.js';
-import { MAX_BODY_BYTES } from '../src/routes/ingest.js';
+import { MAX_BODY_BYTES, resolveMaxBodyBytes } from '../src/routes/ingest.js';
 
 /**
  * [RELAY-4] ingestion tests.
@@ -489,6 +489,44 @@ describe('body handling', () => {
     mockFetch();
     const res = await post('/in/acme/stripe', { body: 'x'.repeat(MAX_BODY_BYTES) });
     expect(res.status).toBe(200);
+  });
+
+  it('accepts a body just under the cap', async () => {
+    mockFetch();
+    const res = await post('/in/acme/stripe', { body: 'x'.repeat(MAX_BODY_BYTES - 1) });
+    expect(res.status).toBe(200);
+  });
+
+  /**
+   * [RELAY-12] `RELAY_MAX_BODY_BYTES` env override — proven at the actual HTTP boundary,
+   * not just via `resolveMaxBodyBytes` unit assertions below, since the whole point of an
+   * env-configurable limit is that it's actually wired into the request path.
+   */
+  it('honors a lower RELAY_MAX_BODY_BYTES override: rejects a body under the hardcoded default but over the override', async () => {
+    mockFetch();
+    const overrideEnv = { ...baseEnv, RELAY_MAX_BODY_BYTES: '100' };
+    const res = await post('/in/acme/stripe', { body: 'x'.repeat(101) }, overrideEnv);
+    expect(res.status).toBe(413);
+  });
+
+  it('honors a lower RELAY_MAX_BODY_BYTES override: accepts a body at the override cap', async () => {
+    mockFetch();
+    const overrideEnv = { ...baseEnv, RELAY_MAX_BODY_BYTES: '100' };
+    const res = await post('/in/acme/stripe', { body: 'x'.repeat(100) }, overrideEnv);
+    expect(res.status).toBe(200);
+  });
+
+  it('resolveMaxBodyBytes falls back to the default for unset, empty, non-numeric, non-integer, and non-positive overrides', () => {
+    expect(resolveMaxBodyBytes({})).toBe(MAX_BODY_BYTES);
+    expect(resolveMaxBodyBytes({ RELAY_MAX_BODY_BYTES: '' })).toBe(MAX_BODY_BYTES);
+    expect(resolveMaxBodyBytes({ RELAY_MAX_BODY_BYTES: 'not-a-number' })).toBe(MAX_BODY_BYTES);
+    expect(resolveMaxBodyBytes({ RELAY_MAX_BODY_BYTES: '100.5' })).toBe(MAX_BODY_BYTES);
+    expect(resolveMaxBodyBytes({ RELAY_MAX_BODY_BYTES: '0' })).toBe(MAX_BODY_BYTES);
+    expect(resolveMaxBodyBytes({ RELAY_MAX_BODY_BYTES: '-500' })).toBe(MAX_BODY_BYTES);
+  });
+
+  it('resolveMaxBodyBytes uses a valid positive-integer override', () => {
+    expect(resolveMaxBodyBytes({ RELAY_MAX_BODY_BYTES: '500000' })).toBe(500000);
   });
 
   it('forwards the raw bytes unaltered so signatures still verify', async () => {

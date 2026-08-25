@@ -62,6 +62,14 @@ export type Bindings = {
    * Absent in local dev, where the keep-warm is pointless.
    */
   RELAY_DASHBOARD_HEALTH_URL?: string;
+  /**
+   * [RELAY-12] Per-environment override for the ingest body-size cap, in bytes. Absent
+   * (the normal case) falls back to `MAX_BODY_BYTES` (1 MiB) in `routes/ingest.ts`. Must
+   * parse as a positive integer; an unset, empty, or malformed value falls back to the
+   * default rather than disabling the cap — this floor exists specifically to keep an
+   * unbounded body out of a 128MB isolate, so a bad env value must never widen it.
+   */
+  RELAY_MAX_BODY_BYTES?: string;
 };
 
 /** Values middleware attaches to the request context. */
