@@ -18,6 +18,11 @@ export * from './approval';
 // must run the SAME one. A second copy on the forward path is the failure this move
 // exists to prevent — two copies drift silently and both then look correct.
 export * from './ssrf';
+// [RELAY-33] Layer two: DNS-over-HTTPS resolution + re-validation of resolved addresses,
+// closing the DNS-rebinding gap `./ssrf.ts`'s own header names as unclosed. The same
+// one-function-not-two-copies reasoning applies — both apps import
+// `resolveAndValidateDestination` from here.
+export * from './ssrf-dns';
 // The proxy↔dashboard internal contract. Exported here so both apps import it as
 // `@coreframe-relay/types` rather than by relative path across an app boundary — the
 // package's `exports` map only exposes `"."`, so a subpath import does not resolve.

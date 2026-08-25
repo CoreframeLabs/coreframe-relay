@@ -74,17 +74,55 @@ const activeRoute = {
 type FetchCall = { url: string; init: RequestInit | undefined };
 let calls: FetchCall[] = [];
 
-/** A `fetch` double that answers route-lookup and QStash separately. */
+/**
+ * [RELAY-33] Default DoH answer for any hostname `mockFetch` is not told otherwise about.
+ *
+ * 203.0.113.10 is RFC 5737 TEST-NET-3 — allocated for documentation, never routed, and
+ * NOT in any range `isBlockedIPv4` rejects. It stands in for "an ordinary public webhook
+ * receiver" so every EXISTING test using `activeRoute.destination` ('https://api.example.com/hook')
+ * keeps resolving to something the validator allows, without a single real DNS lookup —
+ * `ingest.ts` now calls `resolveAndValidateDestination`, which resolves every hostname
+ * destination via DoH, so a suite that did not stub DoH at all would either hit the real
+ * network or reject every non-IP-literal destination in the fixtures as unresolvable.
+ */
+const DEFAULT_TEST_PUBLIC_IP = '203.0.113.10';
+
+/**
+ * A `fetch` double that answers route-lookup, QStash publish, AND — [RELAY-33] — DoH
+ * resolution queries, keyed by URL shape the same way the other two already are.
+ *
+ * `dns` maps a hostname to the list of IPs it should "resolve" to (mixing IPv4/IPv6 forms
+ * is fine — they are told apart by whether the string contains ':', matching how a real
+ * DoH JSON response's A vs AAAA `Answer` entries are told apart here). A hostname with no
+ * entry gets `DEFAULT_TEST_PUBLIC_IP`, so ordinary fixtures never need to opt in.
+ */
 function mockFetch(opts: {
   lookup?: { status: number; body?: unknown };
   publish?: { status: number; body?: unknown };
+  dns?: Record<string, string[]>;
 } = {}) {
   const lookup = opts.lookup ?? { status: 200, body: activeRoute };
   const publish = opts.publish ?? { status: 200, body: { messageId: 'msg_test' } };
+  const dns = opts.dns ?? {};
 
   const fn = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
     const url = typeof input === 'string' ? input : input instanceof URL ? input.toString() : input.url;
     calls.push({ url, init });
+
+    if (url.includes('/dns-query')) {
+      const parsed = new URL(url);
+      const name = parsed.searchParams.get('name') ?? '';
+      const type = parsed.searchParams.get('type');
+      const ips = dns[name] ?? [DEFAULT_TEST_PUBLIC_IP];
+      const wantsV6 = type === 'AAAA';
+      const answers = ips
+        .filter((ip) => ip.includes(':') === wantsV6)
+        .map((data) => ({ name, type: wantsV6 ? 28 : 1, TTL: 60, data }));
+      return new Response(JSON.stringify({ Status: 0, Answer: answers }), {
+        status: 200,
+        headers: { 'content-type': 'application/dns-json' },
+      });
+    }
 
     const spec = url.includes('/v2/publish/') ? publish : lookup;
     return new Response(spec.body === undefined ? '' : JSON.stringify(spec.body), {
@@ -348,6 +386,86 @@ describe('SSRF validation at ingestion', () => {
 
     expect(raw).not.toContain('10.1.2.3');
     expect(raw).not.toContain('secret-path');
+  });
+
+  /**
+   * [RELAY-33] THE DNS-REBINDING GAP, closed at THIS call site.
+   *
+   * The attack this proves closed: a customer (or an attacker who controls the DNS
+   * record) points a route at a hostname that is a clean, ordinary public name at
+   * validation time — the literal-address check in `ssrf.ts` alone would allow it
+   * straight through, exactly as `ssrf.test.ts`'s own "KNOWN GAP" block documents. Before
+   * this ticket, `ingest.ts` called `validateDestination` (literal-only); it now calls
+   * `resolveAndValidateDestination`, which resolves the hostname via DNS-over-HTTPS and
+   * re-checks every resolved A/AAAA record. `mockFetch`'s `dns` option stands in for the
+   * DoH resolver, so this exercises the REAL call path — `routes/ingest.ts` →
+   * `services/ssrf.ts` → `@coreframe-relay/types`'s `resolveAndValidateDestination` — with
+   * only the network boundary doubled, the same way route-lookup and QStash already are.
+   */
+  it('THE DNS-REBINDING GAP: refuses a hostname that resolves to cloud metadata, even though the literal check alone would allow it', async () => {
+    const destination = 'https://evil-attacker-domain.example/hook';
+    mockFetch({
+      lookup: { status: 200, body: { ...activeRoute, destination } },
+      dns: { 'evil-attacker-domain.example': ['169.254.169.254'] },
+    });
+
+    const res = await post('/in/acme/stripe');
+
+    expect(res.status).toBe(502);
+    expect(await res.json()).toMatchObject({ error: 'route destination is not permitted' });
+    expect(publishCalls()).toHaveLength(0);
+  });
+
+  it('refuses a hostname that resolves to an internal RFC-1918 address', async () => {
+    const destination = 'https://looks-public-resolves-internal.example/hook';
+    mockFetch({
+      lookup: { status: 200, body: { ...activeRoute, destination } },
+      dns: { 'looks-public-resolves-internal.example': ['10.50.0.7'] },
+    });
+
+    const res = await post('/in/acme/stripe');
+
+    expect(res.status).toBe(502);
+    expect(publishCalls()).toHaveLength(0);
+  });
+
+  it('REGRESSION: a normal hostname that resolves to an ordinary public address is still queued', async () => {
+    // No `dns` override — `mockFetch`'s default answers every hostname with a clean
+    // TEST-NET-3 address, so `activeRoute.destination` ('https://api.example.com/hook')
+    // resolving normally and being accepted is exactly what every OTHER test in this
+    // file already relies on. This test states that reliance explicitly, once, so a
+    // future change to the DNS-resolving call site that broke ordinary destinations
+    // would be caught by name rather than as a wall of unrelated failures elsewhere.
+    mockFetch();
+    const res = await post('/in/acme/stripe');
+
+    expect(res.status).toBe(200);
+    expect(publishCalls()).toHaveLength(1);
+  });
+
+  it('fails closed when the DoH resolver itself is unreachable — does not queue on an unresolved destination', async () => {
+    const destination = 'https://resolver-down.example/hook';
+    const lookup = { status: 200, body: { ...activeRoute, destination } };
+    const publish = { status: 200, body: { messageId: 'msg_test' } };
+
+    const fn = vi.fn(async (input: RequestInfo | URL) => {
+      const url = typeof input === 'string' ? input : input instanceof URL ? input.toString() : input.url;
+      calls.push({ url, init: undefined });
+      if (url.includes('/dns-query')) {
+        return new Response('resolver unavailable', { status: 500 });
+      }
+      const spec = url.includes('/v2/publish/') ? publish : lookup;
+      return new Response(JSON.stringify(spec.body), {
+        status: spec.status,
+        headers: { 'content-type': 'application/json' },
+      });
+    });
+    vi.stubGlobal('fetch', fn);
+
+    const res = await post('/in/acme/stripe');
+
+    expect(res.status).toBe(502);
+    expect(publishCalls()).toHaveLength(0);
   });
 });
 

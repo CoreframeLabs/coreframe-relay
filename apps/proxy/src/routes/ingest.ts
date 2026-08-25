@@ -10,7 +10,7 @@ import { checkRateLimit } from '../middleware/rateLimit.js';
 import { sha256Hex, timingSafeEqualStrings } from '../middleware/relayKey.js';
 import { lookupRoute } from '../services/routeLookup.js';
 import { publishToQStash } from '../services/qstash.js';
-import { validateDestination } from '../services/ssrf.js';
+import { resolveAndValidateDestination } from '../services/ssrf.js';
 import type { AppEnv } from '../types/bindings.js';
 
 /**
@@ -332,11 +332,18 @@ export const ingest = new Hono<AppEnv>()
     }
 
     /**
-     * SSRF check on the stored destination, at ingestion time.
+     * SSRF check on the stored destination, at ingestion time — [RELAY-33] runs the
+     * DNS-RESOLVING check here, not just the literal-address one.
      *
      * The consumer re-checks before it actually sends ([RELAY-5]) — the destination is
      * editable between these two moments — but checking here means a route pointed at
-     * 169.254.169.254 never gets a message queued against it in the first place.
+     * 169.254.169.254, OR at a hostname that resolves there, never gets a message queued
+     * against it in the first place. `resolveAndValidateDestination` runs the literal
+     * check first (unchanged) and then, for a hostname (never for an IP literal), a
+     * DNS-over-HTTPS lookup with every resolved A/AAAA record re-checked against the same
+     * range logic — see `ssrf-dns.ts` for why this alone is not the LAST line of defence:
+     * the record can still change between this check and the actual send, which is why
+     * `forward.ts` on the dashboard re-resolves again immediately before its own fetch.
      *
      * The reason string is logged, never returned: it names the host, and the host is the
      * customer's private infrastructure.
@@ -353,7 +360,7 @@ export const ingest = new Hono<AppEnv>()
      * as what it is rather than impersonating production truth.
      */
     const isTestSend = c.req.header('x-relay-event') === 'test';
-    let destination = validateDestination(route.destination);
+    let destination = await resolveAndValidateDestination(route.destination);
     if (
       !destination.ok &&
       c.env.RELAY_DASHBOARD_URL &&

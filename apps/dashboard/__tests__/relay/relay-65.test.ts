@@ -279,23 +279,37 @@ describe('[RELAY-65] readStoredHeaders recovers a stored map defensively', () =>
  * except literal `127.0.0.1` on an ephemeral port. `ssrf.forward.spec.ts` remains the file
  * that proves the forward path is SSRF-guarded; this one does not and must not be read as
  * doing so.
+ *
+ * [RELAY-33] UPDATE: `forward.ts` now calls `resolveAndValidateDestination` (the
+ * DNS-resolving layer) rather than `validateDestination` directly, so BOTH are widened
+ * identically here — same narrow scope, same "never widens for anything else" property.
  */
 jest.mock('../../lib/relay/ssrfGap', () => {
   const actual = jest.requireActual('../../lib/relay/ssrfGap');
+
+  const loopbackOverride = (raw: string) => {
+    try {
+      const url = new URL(raw);
+      if (url.hostname === '127.0.0.1' && Number(url.port) >= 1024) {
+        return { ok: true, url };
+      }
+    } catch {
+      // A URL that will not parse stays rejected — the double never widens a failure.
+    }
+    return null;
+  };
+
   return {
     ...actual,
     validateDestination: (raw: string) => {
       const verdict = actual.validateDestination(raw);
       if (verdict.ok) return verdict;
-      try {
-        const url = new URL(raw);
-        if (url.hostname === '127.0.0.1' && Number(url.port) >= 1024) {
-          return { ok: true, url };
-        }
-      } catch {
-        // A URL that will not parse stays rejected — the double never widens a failure.
-      }
-      return verdict;
+      return loopbackOverride(raw) ?? verdict;
+    },
+    resolveAndValidateDestination: async (raw: string) => {
+      const verdict = await actual.resolveAndValidateDestination(raw);
+      if (verdict.ok) return verdict;
+      return loopbackOverride(raw) ?? verdict;
     },
   };
 });

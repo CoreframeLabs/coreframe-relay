@@ -33,20 +33,32 @@
  * (RELAY-84), and a rename collision on a security fix is not a trade worth making. The
  * rename is a follow-up, and it is cosmetic: the control is live either way.
  *
- * ─── STILL OPEN, NAMED RATHER THAN PAPERED OVER ──────────────────────────────────────
+ * ─── THE REMAINING GAP, NOW CLOSED ────────────────────────────────────────────────────
  *
- * This is a LITERAL-ADDRESS validator. It does not resolve DNS, so a hostname that
- * resolves to 169.254.169.254 still passes — RELAY-33's "DNS resolved on our side and the
- * RESOLVED address re-checked" is NOT closed by this change. Cloudflare Workers cannot
- * resolve DNS directly (no `dns` module, no raw socket); it needs a DNS-over-HTTPS lookup
- * plus re-validation of every resolved A/AAAA record, and a TOCTOU gap remains even then.
- * `forward.ts` sets `redirect: 'manual'`, which closes the redirect-chain half of the same
- * problem, and that is the reason it must stay.
+ * `validateDestination` alone is a LITERAL-ADDRESS validator — it does not resolve DNS, so
+ * a hostname that resolves to 169.254.169.254 passed straight through it. That was
+ * RELAY-33's last open AC: "DNS resolved on our side and the RESOLVED address re-checked."
+ *
+ * `resolveAndValidateDestination`, re-exported below from `packages/types/src/ssrf-dns.ts`,
+ * closes it: a DNS-over-HTTPS lookup (Cloudflare cannot resolve DNS directly — no `dns`
+ * module, no raw socket) of every A/AAAA record, each re-checked through
+ * `isBlockedIPv4`/`isBlockedIPv6`. `forward.ts` calls it, not `validateDestination`
+ * directly, and calls it IMMEDIATELY before the outbound `fetch` — resolving once, early,
+ * would just move the TOCTOU window rather than close it, since the record can change
+ * again between an early resolution and the actual send. See `ssrf-dns.ts`'s own header
+ * for the residual gap that remains even so (neither Workers nor Node `fetch` lets us pin
+ * the connection to the address we just validated — the runtime re-resolves at connect
+ * time) and why that is out of reach from inside a fetch-only runtime.
+ *
+ * `forward.ts` also sets `redirect: 'manual'`, which closes the redirect-chain half of the
+ * same problem, and that is the reason it must stay.
  */
 export {
   validateDestination,
+  resolveAndValidateDestination,
   isBlockedIPv4,
   isBlockedIPv6,
   type SsrfCheck,
   type SsrfReason,
+  type ResolveOptions,
 } from '@coreframe-relay/types';
