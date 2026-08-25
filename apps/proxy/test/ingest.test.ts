@@ -34,10 +34,14 @@ const sha256HexOf = (v: string) =>
 /**
  * [RELAY-13] A rate-limiter double standing in for the Workers Rate Limiting binding.
  *
- * `baseEnv` carries an ALWAYS-ALLOW limiter rather than omitting the binding, and that is
- * deliberate: an unbound limiter is a 503 in every deployed environment, so leaving it out
- * of the default env would make every unrelated test in this file assert against a
- * misconfigured Worker instead of a working one.
+ * `baseEnv` carries an ALWAYS-ALLOW limiter on `RELAY_RATE_LIMITER_FREE` rather than
+ * omitting the binding, and that is deliberate: an unbound limiter is a 503 in every
+ * deployed environment, so leaving it out of the default env would make every unrelated
+ * test in this file assert against a misconfigured Worker instead of a working one. It is
+ * the FREE binding specifically because `activeRoute.plan` below is `'FREE'` — the two
+ * have to agree, or every test using `baseEnv` would 503 on a real deployed Worker for the
+ * same reason `RELAY_RATE_LIMITER_PRO`/`_ENTERPRISE` being unbound is a 503 for a PRO/
+ * ENTERPRISE team: there is no fallback across tiers.
  */
 function fakeLimiter(opts: { allowFirst?: number } = {}) {
   const allowFirst = opts.allowFirst ?? Number.POSITIVE_INFINITY;
@@ -57,7 +61,7 @@ const baseEnv = {
   RELAY_DASHBOARD_URL: 'http://localhost:4002',
   UPSTASH_QSTASH_URL: 'https://qstash-eu-central-1.upstash.io',
   UPSTASH_QSTASH_TOKEN: 'qstash-token',
-  RELAY_RATE_LIMITER: fakeLimiter(),
+  RELAY_RATE_LIMITER_FREE: fakeLimiter(),
 };
 
 const activeRoute = {
@@ -69,6 +73,9 @@ const activeRoute = {
   // [RELAY-71] The contract carries the DIGEST. A fixture that still carried the token
   // would keep passing against a proxy that had regressed to reading one.
   ingestTokenSha256: sha256HexOf(INGEST_TOKEN),
+  // [RELAY-13] Matches `baseEnv`'s `RELAY_RATE_LIMITER_FREE` — see the comment on
+  // `fakeLimiter`/`baseEnv` above for why these two have to agree.
+  plan: 'FREE' as const,
 };
 
 type FetchCall = { url: string; init: RequestInit | undefined };
@@ -824,7 +831,7 @@ describe('[RELAY-13] per-team rate limiting', () => {
     // The S3 assertion, in unit form. `allowFirst: 2` stands in for the deployed
     // binding's 600/minute — the ceiling's VALUE is config; its BEHAVIOUR is this.
     mockFetch();
-    const env = { ...baseEnv, RELAY_RATE_LIMITER: fakeLimiter({ allowFirst: 2 }) };
+    const env = { ...baseEnv, RELAY_RATE_LIMITER_FREE: fakeLimiter({ allowFirst: 2 }) };
 
     expect((await post('/in/acme/stripe', {}, env)).status).toBe(200);
     expect((await post('/in/acme/stripe', {}, env)).status).toBe(200);
@@ -844,7 +851,7 @@ describe('[RELAY-13] per-team rate limiting', () => {
     const limiter = fakeLimiter();
     await post('/in/acme/stripe', { headers: { 'cf-connecting-ip': '1.2.3.4' } }, {
       ...baseEnv,
-      RELAY_RATE_LIMITER: limiter,
+      RELAY_RATE_LIMITER_FREE: limiter,
     });
 
     expect(limiter.limit).toHaveBeenCalledWith({ key: TEAM_ID });
@@ -858,7 +865,7 @@ describe('[RELAY-13] per-team rate limiting', () => {
     // one: team A is throttled on its second request while team B's first still passes.
     const OTHER_TEAM = '3f2504e0-4f89-41d3-9a0c-0305e82c3399';
     const limiter = fakeLimiter({ allowFirst: 1 });
-    const env = { ...baseEnv, RELAY_RATE_LIMITER: limiter };
+    const env = { ...baseEnv, RELAY_RATE_LIMITER_FREE: limiter };
 
     mockFetch({ lookup: { status: 200, body: activeRoute } });
     expect((await post('/in/acme/stripe', {}, env)).status).toBe(200);
@@ -875,7 +882,7 @@ describe('[RELAY-13] per-team rate limiting', () => {
     // a team it does not own.
     mockFetch();
     const limiter = fakeLimiter();
-    const env = { ...baseEnv, RELAY_RATE_LIMITER: limiter };
+    const env = { ...baseEnv, RELAY_RATE_LIMITER_FREE: limiter };
 
     const res = await post('/in/acme/stripe', {}, env, '1'.repeat(32));
     expect(res.status).toBe(404);
@@ -887,7 +894,7 @@ describe('[RELAY-13] per-team rate limiting', () => {
     // be refused for the budget, not after a megabyte has already been read into the
     // isolate. If 413 came back, the limiter would be running too late to protect anything.
     mockFetch();
-    const env = { ...baseEnv, RELAY_RATE_LIMITER: fakeLimiter({ allowFirst: 0 }) };
+    const env = { ...baseEnv, RELAY_RATE_LIMITER_FREE: fakeLimiter({ allowFirst: 0 }) };
 
     const res = await post('/in/acme/stripe', { body: 'x'.repeat(MAX_BODY_BYTES + 1) }, env);
     expect(res.status).toBe(429);
@@ -901,7 +908,7 @@ describe('[RELAY-13] per-team rate limiting', () => {
     const errSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
     try {
       for (const ENVIRONMENT of ['production', 'staging'] as const) {
-        const { RELAY_RATE_LIMITER: _unbound, ...noLimiter } = baseEnv;
+        const { RELAY_RATE_LIMITER_FREE: _unbound, ...noLimiter } = baseEnv;
         const res = await post('/in/acme/stripe', {}, { ...noLimiter, ENVIRONMENT });
 
         expect(res.status, ENVIRONMENT).toBe(503);
@@ -915,7 +922,7 @@ describe('[RELAY-13] per-team rate limiting', () => {
 
   it('falls open in development only, so an unrelated local edit is not bricked', async () => {
     mockFetch();
-    const { RELAY_RATE_LIMITER: _unbound, ...noLimiter } = baseEnv;
+    const { RELAY_RATE_LIMITER_FREE: _unbound, ...noLimiter } = baseEnv;
     const res = await post('/in/acme/stripe', {}, noLimiter);
     expect(res.status).toBe(200);
   });
@@ -927,7 +934,7 @@ describe('[RELAY-13] per-team rate limiting', () => {
     const broken = {
       limit: vi.fn(async () => { throw new Error('rate limiter unavailable'); }),
     };
-    const res = await post('/in/acme/stripe', {}, { ...baseEnv, RELAY_RATE_LIMITER: broken });
+    const res = await post('/in/acme/stripe', {}, { ...baseEnv, RELAY_RATE_LIMITER_FREE: broken });
 
     expect(res.status).toBe(429);
     expect(res.headers.get('retry-after')).toBe(String(RATE_LIMIT_WINDOW_SECONDS));
@@ -936,7 +943,7 @@ describe('[RELAY-13] per-team rate limiting', () => {
 
   it('carries the correlation id on a 429 and leaks nothing else', async () => {
     mockFetch();
-    const env = { ...baseEnv, RELAY_RATE_LIMITER: fakeLimiter({ allowFirst: 0 }) };
+    const env = { ...baseEnv, RELAY_RATE_LIMITER_FREE: fakeLimiter({ allowFirst: 0 }) };
     const res = await post('/in/acme/stripe', {}, env);
     const raw = await res.text();
 
@@ -945,6 +952,117 @@ describe('[RELAY-13] per-team rate limiting', () => {
     expect(raw).not.toContain(INGEST_TOKEN);
     expect(raw).not.toContain(SECRET);
     expect(raw).not.toContain(activeRoute.destination);
+  });
+});
+
+// ─── [RELAY-13] Per-plan limits, configurable without a redeploy ───────────────────
+
+/**
+ * The AC these tests close: "Limits are per-plan and configurable without a redeploy."
+ *
+ * The mechanism (full reasoning in `middleware/rateLimit.ts`): three pre-declared
+ * Cloudflare Rate Limiting bindings, one per `Plan`, selected in code by
+ * `RouteLookupResponse.plan`. What has to be true for that mechanism to actually satisfy
+ * the AC, and what each test below proves:
+ *
+ *   - A PRO team's budget is checked against the PRO binding, not FREE's — otherwise
+ *     "per-plan" is cosmetic.
+ *   - Two teams on DIFFERENT plans do not share a bucket, same as two teams on the same
+ *     plan already don't (S3, above).
+ *   - A team's plan changing (the dashboard's `Team.plan` column, no Worker redeploy) is
+ *     picked up by the very next lookup — proven here as "the same env, a different
+ *     lookup response, a different binding consulted", which is what a plan change looks
+ *     like from the proxy's side without actually running a second deploy in a test.
+ *   - There is no cross-tier fallback: a plan whose OWN binding is unbound 503s even when
+ *     a different tier's binding is present and working, because falling back either
+ *     direction would silently misstate the team's real ceiling.
+ */
+describe('[RELAY-13] per-plan rate limits', () => {
+  it('a PRO team is checked against RELAY_RATE_LIMITER_PRO, not _FREE', async () => {
+    const freeLimiter = fakeLimiter();
+    const proLimiter = fakeLimiter();
+    const env = {
+      ...baseEnv,
+      RELAY_RATE_LIMITER_FREE: freeLimiter,
+      RELAY_RATE_LIMITER_PRO: proLimiter,
+    };
+    mockFetch({ lookup: { status: 200, body: { ...activeRoute, plan: 'PRO' } } });
+
+    const res = await post('/in/acme/stripe', {}, env);
+
+    expect(res.status).toBe(200);
+    expect(proLimiter.limit).toHaveBeenCalledWith({ key: TEAM_ID });
+    expect(freeLimiter.limit).not.toHaveBeenCalled();
+  });
+
+  it('an ENTERPRISE team is checked against RELAY_RATE_LIMITER_ENTERPRISE', async () => {
+    const enterpriseLimiter = fakeLimiter();
+    const env = { ...baseEnv, RELAY_RATE_LIMITER_ENTERPRISE: enterpriseLimiter };
+    mockFetch({ lookup: { status: 200, body: { ...activeRoute, plan: 'ENTERPRISE' } } });
+
+    const res = await post('/in/acme/stripe', {}, env);
+
+    expect(res.status).toBe(200);
+    expect(enterpriseLimiter.limit).toHaveBeenCalledWith({ key: TEAM_ID });
+  });
+
+  it('a PRO team hitting its own budget does not throttle a FREE team, or vice versa', async () => {
+    // Same shape as the existing "one team does not throttle another" proof, but across
+    // TIERS rather than across teams on the same tier — the two limiters must be
+    // genuinely independent buckets, not the same counter read two ways.
+    const freeLimiter = fakeLimiter({ allowFirst: 0 });
+    const proLimiter = fakeLimiter({ allowFirst: 0 });
+    const env = {
+      ...baseEnv,
+      RELAY_RATE_LIMITER_FREE: freeLimiter,
+      RELAY_RATE_LIMITER_PRO: proLimiter,
+    };
+
+    mockFetch({ lookup: { status: 200, body: { ...activeRoute, plan: 'FREE' } } });
+    expect((await post('/in/acme/stripe', {}, env)).status).toBe(429);
+
+    mockFetch({ lookup: { status: 200, body: { ...activeRoute, plan: 'PRO' } } });
+    expect((await post('/in/beta/stripe', {}, env)).status).toBe(429);
+
+    expect(freeLimiter.seen).toEqual([TEAM_ID]);
+    expect(proLimiter.seen).toEqual([TEAM_ID]);
+  });
+
+  it('a plan change is visible on the very next lookup — no redeploy in this path', async () => {
+    // Simulates what a `Team.plan` UPDATE looks like from the proxy's side: the SAME
+    // Worker env (no binding added, nothing redeployed), a fresh dashboard response with
+    // a different `plan`. No KV in this env, so every request is an uncached lookup.
+    const freeLimiter = fakeLimiter();
+    const proLimiter = fakeLimiter();
+    const env = {
+      ...baseEnv,
+      RELAY_RATE_LIMITER_FREE: freeLimiter,
+      RELAY_RATE_LIMITER_PRO: proLimiter,
+    };
+
+    mockFetch({ lookup: { status: 200, body: { ...activeRoute, plan: 'FREE' } } });
+    await post('/in/acme/stripe', {}, env);
+    expect(freeLimiter.limit).toHaveBeenCalledTimes(1);
+    expect(proLimiter.limit).not.toHaveBeenCalled();
+
+    mockFetch({ lookup: { status: 200, body: { ...activeRoute, plan: 'PRO' } } });
+    await post('/in/acme/stripe', {}, env);
+    expect(proLimiter.limit).toHaveBeenCalledTimes(1);
+    expect(freeLimiter.limit).toHaveBeenCalledTimes(1); // unchanged — the second call went to PRO
+  });
+
+  it('503s a PRO team when ONLY the PRO binding is unbound, even with FREE bound and working', async () => {
+    // The no-fallback proof. If this silently fell back to `_FREE`, a misconfigured
+    // deploy would quietly give a PRO team the FREE ceiling instead of failing loudly.
+    mockFetch({ lookup: { status: 200, body: { ...activeRoute, plan: 'PRO' } } });
+    const errSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+    try {
+      const res = await post('/in/acme/stripe', {}, { ...baseEnv, ENVIRONMENT: 'production' as const });
+      expect(res.status).toBe(503);
+      expect(await res.json()).toMatchObject({ error: 'proxy not configured' });
+    } finally {
+      errSpy.mockRestore();
+    }
   });
 });
 
@@ -993,11 +1111,11 @@ describe('[S8] no credential reaches a log line', () => {
 
       // 4. Throttled → 429.
       mockFetch();
-      await post('/in/acme/stripe', {}, { ...baseEnv, RELAY_RATE_LIMITER: fakeLimiter({ allowFirst: 0 }) });
+      await post('/in/acme/stripe', {}, { ...baseEnv, RELAY_RATE_LIMITER_FREE: fakeLimiter({ allowFirst: 0 }) });
 
       // 5. Limiter unbound in a deployed env → 503.
       mockFetch();
-      const { RELAY_RATE_LIMITER: _unbound, ...noLimiter } = baseEnv;
+      const { RELAY_RATE_LIMITER_FREE: _unbound, ...noLimiter } = baseEnv;
       await post('/in/acme/stripe', {}, { ...noLimiter, ENVIRONMENT: 'production' as const });
 
       // 6. SSRF refusal → 502. The reason names the customer's host; it is logged, and

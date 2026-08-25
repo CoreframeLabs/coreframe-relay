@@ -37,11 +37,26 @@ import { RouteStatusSchema } from './route';
  */
 
 /**
+ * [RELAY-13] The proxy's per-team rate-limit tier.
+ *
+ * Mirrors the `Plan` enum in `prisma/schema.prisma`. The proxy selects one of a small,
+ * fixed set of pre-declared Cloudflare Workers Rate Limiting bindings by this value — see
+ * `apps/proxy/src/middleware/rateLimit.ts` for why that binding's own `limit`/`period`
+ * cannot vary per caller at runtime (Cloudflare's own constraint, not a design choice
+ * here), which is why the SELECTION has to happen in application code instead.
+ */
+export const PlanSchema = z.enum(['FREE', 'PRO', 'ENTERPRISE']);
+export type Plan = z.infer<typeof PlanSchema>;
+
+/**
  * What the proxy needs to accept and queue a webhook, and nothing else.
  *
- * Note what is ABSENT: team name, member list, plan, every other route. The proxy is the
- * least-trusted component in the system — it is the only one exposed to the raw internet —
- * so the response is scoped to exactly the fields ingestion uses.
+ * Note what is ABSENT: team name, member list, billing id, every other route. `plan` USED
+ * to be on that absent list too — see [RELAY-13] below for why it was deliberately added
+ * back. The proxy is the least-trusted component in the system — it is the only one
+ * exposed to the raw internet — so the response is scoped to exactly the fields ingestion
+ * uses, and that principle is what decided the answer both times: `plan` was excluded
+ * while nothing needed it, and included the moment rate limiting genuinely did.
  */
 export const RouteLookupResponseSchema = z.object({
   routeId: z.string().uuid(),
@@ -83,6 +98,14 @@ export const RouteLookupResponseSchema = z.object({
   ingestTokenSha256: z
     .string()
     .regex(/^[0-9a-f]{64}$/, 'lower-case hex SHA-256 digest'),
+  /**
+   * [RELAY-13] Which pre-declared rate-limiter binding governs this team's ingestion.
+   * See `PlanSchema` above for the full rationale. Defaults to the most restrictive
+   * tier (`FREE`) at the Prisma column level, never here — this schema has no `.default`
+   * on purpose, so a dashboard response that forgot to select the column fails CLOSED
+   * (`bad_response`, 503) rather than silently under-limiting every team.
+   */
+  plan: PlanSchema,
 });
 export type RouteLookupResponse = z.infer<typeof RouteLookupResponseSchema>;
 

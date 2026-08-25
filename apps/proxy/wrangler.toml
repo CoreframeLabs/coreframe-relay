@@ -36,38 +36,89 @@ vars = { ENVIRONMENT = "staging" }
 # binding = "RELAY_KV"
 # id = "<issued by: wrangler kv namespace create RELAY_KV>"
 
-# [RELAY-13] Per-team ingestion rate limiter.
+# [RELAY-13] Per-team, per-PLAN ingestion rate limiters.
 #
-# This is the Workers Rate Limiting binding, NOT KV, and that is deliberate: RELAY_KV is
-# still unbound (above), so a KV-backed limiter would be inert on the deployed Worker
-# while reading as done in the source. `namespace_id` is chosen by us, not issued by
-# Cloudflare, so unlike the KV block this binding is complete as written and enforces
-# from the first deploy. Full reasoning in `src/middleware/rateLimit.ts`.
+# THREE bindings, not one — this is the direct consequence of a real platform constraint,
+# not a style choice. Cloudflare's Rate Limiting binding fixes `simple.limit`/`period` at
+# DEPLOY time per binding; `limit({ key })` only ever takes a key, nothing that varies the
+# ceiling per caller. Confirmed against Cloudflare's own docs 2026-08-25 (see the note in
+# `src/middleware/rateLimit.ts`): to get different ceilings for different callers, the
+# platform's own answer is "define and configure multiple rate limiting configurations per
+# Worker" — i.e. exactly this. So "configurable per plan without a redeploy" is delivered
+# by the SELECTION varying at runtime (which binding a request's `route.plan` resolves to,
+# read fresh from the dashboard every ROUTE_LOOKUP_CACHE_TTL_SECONDS), not by any single
+# binding's own ceiling varying — Cloudflare does not offer that lever at all.
 #
-# `period` accepts 10 or 60 seconds and nothing else. 600/minute per team is 10/s
-# sustained, which is far above any real webhook source (Stripe's own burst ceiling for a
-# single account is well under this) and far below what would cost us anything.
+# Each `namespace_id` is chosen by us and must be distinct per binding, not issued by
+# Cloudflare, so — like the single-binding version this replaces — all three are complete
+# as written and enforce from the first deploy; no dependency on RELAY_KV, which is still
+# unbound (see the block above).
 #
-# The key is `teamId`, applied in the handler after authentication — never an IP, which
-# Cloudflare rotates. Declared on every environment INCLUDING the top-level one so that
-# `wrangler dev` exercises the same control the deployed Worker runs.
+# `period` accepts 10 or 60 seconds and nothing else, so all three tiers share it. Ceilings
+# are a multiple of the original 600/minute FREE default (itself far above any real webhook
+# source — Stripe's own single-account burst ceiling is well under it — and far below what
+# would cost us anything): PRO at 5x, ENTERPRISE at 20x. These are starting numbers, not a
+# measured product decision — revisit once a real PRO/ENTERPRISE customer exists to measure
+# against. Adding a FOURTH tier needs a new binding here and IS a redeploy; changing which
+# tier an EXISTING team is on is a single `Team.plan` UPDATE and needs no redeploy at all —
+# that distinction is the literal boundary of what this mechanism does and does not cover.
+#
+# The key is still `teamId`, applied in the handler after authentication — never an IP,
+# which Cloudflare rotates. Declared on every environment INCLUDING the top-level one so
+# that `wrangler dev` exercises the same control the deployed Worker runs.
 [[unsafe.bindings]]
-name = "RELAY_RATE_LIMITER"
+name = "RELAY_RATE_LIMITER_FREE"
+type = "ratelimit"
+namespace_id = "1001"
+simple = { limit = 600, period = 60 }
+
+[[unsafe.bindings]]
+name = "RELAY_RATE_LIMITER_PRO"
+type = "ratelimit"
+namespace_id = "1002"
+simple = { limit = 3000, period = 60 }
+
+[[unsafe.bindings]]
+name = "RELAY_RATE_LIMITER_ENTERPRISE"
+type = "ratelimit"
+namespace_id = "1003"
+simple = { limit = 12000, period = 60 }
+
+[[env.production.unsafe.bindings]]
+name = "RELAY_RATE_LIMITER_FREE"
 type = "ratelimit"
 namespace_id = "1001"
 simple = { limit = 600, period = 60 }
 
 [[env.production.unsafe.bindings]]
-name = "RELAY_RATE_LIMITER"
+name = "RELAY_RATE_LIMITER_PRO"
+type = "ratelimit"
+namespace_id = "1002"
+simple = { limit = 3000, period = 60 }
+
+[[env.production.unsafe.bindings]]
+name = "RELAY_RATE_LIMITER_ENTERPRISE"
+type = "ratelimit"
+namespace_id = "1003"
+simple = { limit = 12000, period = 60 }
+
+[[env.staging.unsafe.bindings]]
+name = "RELAY_RATE_LIMITER_FREE"
 type = "ratelimit"
 namespace_id = "1001"
 simple = { limit = 600, period = 60 }
 
 [[env.staging.unsafe.bindings]]
-name = "RELAY_RATE_LIMITER"
+name = "RELAY_RATE_LIMITER_PRO"
 type = "ratelimit"
-namespace_id = "1001"
-simple = { limit = 600, period = 60 }
+namespace_id = "1002"
+simple = { limit = 3000, period = 60 }
+
+[[env.staging.unsafe.bindings]]
+name = "RELAY_RATE_LIMITER_ENTERPRISE"
+type = "ratelimit"
+namespace_id = "1003"
+simple = { limit = 12000, period = 60 }
 
 # [RELAY-67] Daily keep-warm ping so Supabase Free's 7-day no-activity pause never
 # fires. Hits the DASHBOARD's /api/health (which performs one real DB read), observed

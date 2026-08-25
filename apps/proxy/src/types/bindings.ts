@@ -32,19 +32,29 @@ export type Bindings = {
   /** Idempotency keys and the route-lookup cache ([RELAY-4]). Still unbound — see below. */
   RELAY_KV?: KVNamespace;
   /**
-   * [RELAY-13] Per-team ingestion rate limiter — the Workers Rate Limiting binding,
-   * declared in `wrangler.toml` under `[[unsafe.bindings]]`.
+   * [RELAY-13] Per-team, per-PLAN ingestion rate limiters — the Workers Rate Limiting
+   * binding, declared in `wrangler.toml` under `[[unsafe.bindings]]`, one per plan tier.
+   *
+   * THREE bindings, not one. Cloudflare's Rate Limiting binding fixes its `limit`/`period`
+   * at deploy time per binding — the `limit()` call only ever takes a `key`, nothing that
+   * varies the ceiling per caller — so "per-plan limits" cannot be one binding whose
+   * number changes at runtime. It has to be a small, fixed set of bindings, one per tier,
+   * selected in application code by the team's plan. Full reasoning, including the
+   * Cloudflare-docs confirmation of that constraint, is in `middleware/rateLimit.ts`.
    *
    * NOT KV, on purpose. `RELAY_KV` has never been bound (its `wrangler.toml` block is
    * commented out pending an issued namespace id), so a KV-backed limiter would be inert
-   * on the deployed Worker while looking complete in the source. This binding needs no
-   * issued id and is enforced by the runtime. Full reasoning in `middleware/rateLimit.ts`.
+   * on the deployed Worker while looking complete in the source. These bindings need no
+   * issued id and are enforced by the runtime.
    *
    * Optional in the type for the same reason every other secret is: the Worker must boot
-   * and answer /health when it is missing. It is NOT optional in behaviour — a deployed
-   * environment without it refuses ingestion with 503 rather than failing open.
+   * and answer /health when one is missing. NOT optional in behaviour — a deployed
+   * environment missing the binding a request's plan resolves to refuses ingestion with
+   * 503 rather than falling back to a different plan's ceiling or failing open.
    */
-  RELAY_RATE_LIMITER?: RateLimiterBinding;
+  RELAY_RATE_LIMITER_FREE?: RateLimiterBinding;
+  RELAY_RATE_LIMITER_PRO?: RateLimiterBinding;
+  RELAY_RATE_LIMITER_ENTERPRISE?: RateLimiterBinding;
   /**
    * [RELAY-67] Dashboard health endpoint the daily Cron Trigger pings to keep the
    * hosted Supabase project busy enough that Supabase Free's 7-day no-activity pause
