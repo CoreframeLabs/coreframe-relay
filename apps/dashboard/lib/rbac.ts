@@ -10,6 +10,18 @@ export async function validateMembershipOperation(
   }
 ) {
   const updatingMember = await getTeamMember(memberId, teamMember.team.slug);
+
+  // [RELAY-63] `getTeamMember` now returns `null` instead of throwing a raw Prisma
+  // error when `memberId` (attacker-controllable: it comes straight off
+  // `req.query`/`req.body` in members.ts's DELETE/PATCH handlers) is not actually a
+  // member of this team. Previously this reached `updatingMember.role` on `null` --
+  // a raw TypeError, the same "internal detail in the response" failure this ticket
+  // is about, just via a different exception type. 404 matches the status this
+  // caller's own team-access check already uses for "not visible to you".
+  if (!updatingMember) {
+    throw new ApiError(404, 'Member not found.');
+  }
+
   // Member and Admin can't update the role of Owner
   if (
     (teamMember.role === Role.MEMBER || teamMember.role === Role.ADMIN) &&

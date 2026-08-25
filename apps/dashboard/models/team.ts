@@ -6,6 +6,7 @@ import type { NextApiRequest, NextApiResponse } from 'next';
 import { getCurrentUser } from './user';
 import { normalizeUser } from './user';
 import { validateWithSchema, teamSlugSchema } from '@/lib/zod';
+import { ApiError } from '@/lib/errors';
 
 export const createTeam = async (param: {
   userId: string;
@@ -333,16 +334,30 @@ export const throwIfNoTeamAccess = async (
 ) => {
   const session = await getSession(req, res);
 
+  // [RELAY-63] `ApiError`, not a plain `Error` -- a plain `Error` carries no
+  // `.status`, so every route handler's `catch (error: any) { status: error.status
+  // || 500 }` fell through to 500 for a caller with no session, same as it did for
+  // the cross-team case below.
   if (!session) {
-    throw new Error('Unauthorized');
+    throw new ApiError(401, 'Unauthorized');
   }
 
   const { slug } = validateWithSchema(teamSlugSchema, req.query);
 
   const teamMember = await getTeamMember(session.user.id, slug);
 
+  // [RELAY-63] This branch used to be dead code: `getTeamMember` called
+  // `prisma.teamMember.findFirstOrThrow`, which THROWS `PrismaClientKnownRequestError`
+  // (P2025, "No TeamMember found") the moment an authenticated user asks for a team
+  // they do not belong to -- so this `if` never ran, and the raw Prisma error reached
+  // every team-scoped handler's generic `catch` as an uncaught 500. Fixed at the
+  // source in `getTeamMember` below (now `findFirst`, returns `null`); this `if` is
+  // what actually executes now. 404, not 403: a caller who is not a member of a team
+  // that legitimately exists must see the same response as a caller who asked for a
+  // team that does not exist at all -- a 403 here would itself be the disclosure this
+  // ticket is about (it confirms the team exists).
   if (!teamMember) {
-    throw new Error('You do not have access to this team');
+    throw new ApiError(404, 'Team not found.');
   }
 
   return {
@@ -422,8 +437,16 @@ Execution Time: 0.050 ms
 */
 
 // Get the current user's team member object
+//
+// [RELAY-63] Returns `null`, not a thrown `PrismaClientKnownRequestError`, when no
+// row exists for `(userId, slug)`. This is THE shared team-access helper the ticket
+// names: `throwIfNoTeamAccess` and `getCurrentUserWithTeam` are its only two callers
+// in the request path, and `lib/rbac.ts`'s `validateMembershipOperation` is a third
+// (a different question -- "is this OTHER user id really a member of this team" --
+// same underlying failure mode before this fix). Fixing it here, once, is what makes
+// the ticket's "not at individual call sites" acceptance criterion true.
 export const getTeamMember = async (userId: string, slug: string) => {
-  return await prisma.teamMember.findFirstOrThrow({
+  return await prisma.teamMember.findFirst({
     where: {
       userId,
       team: {
@@ -448,7 +471,19 @@ export const getCurrentUserWithTeam = async (
 
   const { slug } = validateWithSchema(teamSlugSchema, req.query);
 
-  const { role, team } = await getTeamMember(user.id, slug);
+  const teamMember = await getTeamMember(user.id, slug);
+
+  // [RELAY-63] Defensive, not the primary fix: every real call site invokes this
+  // AFTER `throwIfNoTeamAccess` already verified membership for the same
+  // `(user, slug)` pair, so `teamMember` is null here only on a genuine race (e.g.
+  // membership revoked between the two calls). Without this guard, destructuring
+  // `null` throws a raw `TypeError` instead of a clean 404 -- a smaller version of
+  // the same "internal detail reaches the response" problem this ticket is about.
+  if (!teamMember) {
+    throw new ApiError(404, 'Team not found.');
+  }
+
+  const { role, team } = teamMember;
 
   return {
     ...user,

@@ -1,6 +1,7 @@
 import { Card } from '@/components/shared';
 import { Error, Loading } from '@/components/shared';
 import { TeamTab } from '@/components/team';
+import { ApiError } from '@/lib/errors';
 import env from '@/lib/env';
 import { inferSSRProps } from '@/lib/inferSSRProps';
 import { getViewerToken } from '@/lib/retraced';
@@ -84,6 +85,18 @@ export async function getServerSideProps(context: GetServerSidePropsContext) {
   );
 
   try {
+    // [RELAY-63] `getTeamMember` now returns `null` instead of throwing a raw Prisma
+    // error for "no membership row" (see models/team.ts). This route called it
+    // directly rather than through `throwIfNoTeamAccess`, so it needs its own guard:
+    // without it, `throwIfNotAllowed(null, ...)` throws a raw `TypeError` that the
+    // catch below would still render safely, but with an unhelpful internal message
+    // instead of the same clean wording every other team-scoped route now gives.
+    // `ApiError`, not the bare `Error` constructor: this file's own top import
+    // shadows the global `Error` with the `@/components/shared` React component of
+    // the same name, so `new Error(...)` here would try to construct THAT instead.
+    if (!teamMember) {
+      throw new ApiError(404, 'Team not found.');
+    }
     throwIfNotAllowed(teamMember, 'team_audit_log', 'read');
 
     const auditLogToken = await getViewerToken(
