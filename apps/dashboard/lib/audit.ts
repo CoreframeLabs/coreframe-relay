@@ -20,6 +20,7 @@
 
 import { Prisma } from '@prisma/client';
 import { prisma } from '@/lib/prisma';
+import { withTeamScope } from '@/lib/db/scope';
 import type { AppEvent } from 'types';
 
 /** Actor is nullable: some events (invitation accepted) are triggered by a non-member. */
@@ -36,22 +37,36 @@ export type AuditEvent = {
  *
  * [RELAY-2] swapped this body from a log line to a real row, exactly as [RELAY-1]
  * planned. Not one call site changed — that was the point of the seam.
+ *
+ * [RELAY-39 G2a follow-up, found 2026-08-25] `AuditLog` is one of the six
+ * RLS_PROTECTED_MODELS (lib/db/scope.ts) — since the `DATABASE_URL` flip to `relay_app`,
+ * an unscoped write here hits Postgres RLS deny-all (`42501: new row violates row-level
+ * security policy for table "AuditLog"`), confirmed live via Vercel's runtime-error
+ * tracking on `/api/auth/join`'s `team.created` event. `recordAuditEvent()` never throws
+ * by design, so this failed silently — no 500, just a permanently missing audit row —
+ * since the flip landed. Every `AuditEvent` already carries `teamId`, so the fix is one
+ * `withTeamScope` wrap here rather than hunting down and fixing every one of this
+ * function's many call sites individually (team creation, invitations, members, routes,
+ * …) — the seam this module documents above is exactly what makes a single-point fix
+ * possible.
  */
 async function persist(entry: AuditEvent): Promise<void> {
-  await prisma.auditLog.create({
-    data: {
-      teamId: entry.teamId,
-      // The column is a plain string, not an enum: audit events outlive the AppEvent
-      // union (route_created, payload_approved, …) and a migration should not be the
-      // cost of recording a new kind of event.
-      event: entry.event,
-      // "system" rather than null for machine-initiated events — the column is NOT NULL
-      // and an unattributed row is worse than an explicitly attributed one.
-      actor: entry.actor ?? 'system',
-      target: entry.target ?? null,
-      metadata: (entry.metadata ?? {}) as Prisma.InputJsonValue,
-    },
-  });
+  await withTeamScope(entry.teamId, () =>
+    prisma.auditLog.create({
+      data: {
+        teamId: entry.teamId,
+        // The column is a plain string, not an enum: audit events outlive the AppEvent
+        // union (route_created, payload_approved, …) and a migration should not be the
+        // cost of recording a new kind of event.
+        event: entry.event,
+        // "system" rather than null for machine-initiated events — the column is NOT NULL
+        // and an unattributed row is worse than an explicitly attributed one.
+        actor: entry.actor ?? 'system',
+        target: entry.target ?? null,
+        metadata: (entry.metadata ?? {}) as Prisma.InputJsonValue,
+      },
+    })
+  );
 }
 
 /**
