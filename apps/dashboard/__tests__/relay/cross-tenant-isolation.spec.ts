@@ -699,7 +699,25 @@ describeIfConfigured('[cross-tenant isolation] every team-scoped Relay handler',
     // this positive control is the one place that ordering quirk would show up as a red
     // test rather than as a leak. Measured here rather than assumed from reading the code.
     it('consumeEnvelope still delivers and records a real DeliveryLog row for the caller\'s own route', async () => {
-      const fetchSpy = jest.spyOn(global, 'fetch').mockResolvedValue(new Response('{}', { status: 200 }));
+      // [RELAY-33] forwardToDestination now calls resolveAndValidateDestination, which
+      // itself calls `fetch` (a DoH lookup against cloudflare-dns.com) before the real
+      // outbound forward fetch. A blanket mock answering every call with `{}`/200 makes
+      // the DoH call return an unparseable "DNS" response (Status is undefined, not 0),
+      // which the resolver correctly treats as zero records and fails closed — the SSRF
+      // layer is behaving exactly as designed, the test fixture just didn't distinguish
+      // the two `fetch` calls. Route on URL: DoH calls get a real DoH-shaped answer
+      // resolving to a safe public IP (93.184.216.34, example.com's own address), the
+      // actual forward call gets the original stub response.
+      const fetchSpy = jest.spyOn(global, 'fetch').mockImplementation(async (input) => {
+        const url = typeof input === 'string' ? input : (input as Request).url ?? String(input);
+        if (url.includes('cloudflare-dns.com')) {
+          return new Response(
+            JSON.stringify({ Status: 0, Answer: [{ name: 'a.example.com', type: 1, TTL: 60, data: '93.184.216.34' }] }),
+            { status: 200 }
+          );
+        }
+        return new Response('{}', { status: 200 });
+      });
       const requestId = randomUUID();
       try {
         const res = makeResponse();
