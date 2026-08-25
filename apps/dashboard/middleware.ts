@@ -80,6 +80,14 @@ const unAuthenticatedRoutes = [
   // QStash's request signature, both before touching any data.
   '/api/relay/internal/route-lookup',
   '/api/relay/qstash',
+  // [RELAY-44] Vercel Cron invokes this with no NextAuth session — only a
+  // `CRON_SECRET` bearer token, checked inside the handler itself
+  // (`pages/api/relay/internal/dlq-health-check.ts`). Left off this list it would
+  // 307 to `/auth/login` before the handler's own auth ever ran, and the cron would
+  // "succeed" against an HTML page every invocation. Named exactly, same reasoning
+  // as route-lookup above: `/api/relay/internal/*` would silently un-authenticate
+  // any future file dropped into that directory.
+  '/api/relay/internal/dlq-health-check',
   // [RELAY-50] The catcher is a per-route webhook receiver, and its whole point is
   // reachable from the browser for a user who has not yet wired a destination. The URL
   // is the credential (same reasoning as the ingest token itself, RELAY-57). It must
