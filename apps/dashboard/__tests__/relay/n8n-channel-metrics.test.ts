@@ -74,7 +74,7 @@ const SUBSCRIPTIONS = [
   // cus_c has no Subscription row at all — this is what makes case (c) "not paying".
 ];
 
-const PRICES = [{ id: 'price_19', amount: 19 }];
+const PRICES = [{ id: 'price_19', amount: 19, currency: 'usd' }];
 
 function installMocks() {
   // Simulates Postgres applying the model's own `where` against the fixture.
@@ -118,6 +118,26 @@ describe('[n8n channel metrics] getN8nChannelMetrics', () => {
 
     expect(result.payingCustomerCount).toBe(1);
     expect(result.channelMrr).toBe(19);
+    expect(result.currency).toBe('usd');
+  });
+
+  it('[CFO review, 2026-08-26] currency is null (not silently mixed) when active subscriptions span more than one currency', async () => {
+    mockPriceFindMany.mockImplementation(({ where }: { where: { id: { in: string[] } } }) =>
+      Promise.resolve([
+        { id: 'price_19', amount: 19, currency: 'usd' },
+        { id: 'price_20_eur', amount: 20, currency: 'eur' },
+      ].filter((p) => where.id.in.includes(p.id)))
+    );
+    mockSubscriptionFindMany.mockResolvedValueOnce([
+      { customerId: 'cus_a', priceId: 'price_19', active: true },
+      { customerId: 'cus_c', priceId: 'price_20_eur', active: true },
+    ]);
+
+    const result = await getN8nChannelMetrics();
+
+    expect(result.payingCustomerCount).toBe(2);
+    expect(result.channelMrr).toBe(39);
+    expect(result.currency).toBeNull();
   });
 
   it('(b) excludes a paying team with attributionSource=null — never reaches the eligible-teams result', async () => {
@@ -163,7 +183,7 @@ describe('[n8n channel metrics] getN8nChannelMetrics', () => {
 
     const result = await getN8nChannelMetrics();
 
-    expect(result).toEqual({ payingCustomerCount: 0, channelMrr: 0 });
+    expect(result).toEqual({ payingCustomerCount: 0, channelMrr: 0, currency: null });
     expect(mockSubscriptionFindMany).not.toHaveBeenCalled();
     expect(mockPriceFindMany).not.toHaveBeenCalled();
   });
