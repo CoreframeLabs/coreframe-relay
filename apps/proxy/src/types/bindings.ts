@@ -63,6 +63,27 @@ export type Bindings = {
    */
   RELAY_DASHBOARD_HEALTH_URL?: string;
   /**
+   * [RELAY-67 / RELAY-44] DSN for `@sentry/cloudflare` — the Workers-native Sentry SDK,
+   * NOT the dashboard's `@sentry/nextjs` (a Next.js-only SDK that does not run in the
+   * Workers runtime at all; see `apps/dashboard/instrumentation.ts` for that side).
+   *
+   * Same optional-secret pattern as `RELAY_DASHBOARD_HEALTH_URL` immediately above: the
+   * Worker must boot and answer /health even when this is unset, so a missing DSN
+   * degrades to "Sentry disabled" (the `withSentry` options callback in `index.ts`
+   * returns `undefined` when this is falsy — the SDK's own documented way to no-op),
+   * never a boot failure. Set via `wrangler secret put SENTRY_DSN`, never as a `[vars]`
+   * value in `wrangler.toml`.
+   *
+   * Whether this should REUSE the dashboard's existing Sentry project (`javascript-nextjs`,
+   * org `coreframe-labs-ltd`, confirmed via Sentry MCP to be the only project in that org
+   * as of this writing) or point at a new Workers-specific project is a decision for
+   * whoever sets the real value — not resolved here. No real DSN exists anywhere in this
+   * repo (checked `apps/dashboard/.env.example`, `sentry.client.config.ts`,
+   * `instrumentation.ts` — all read `NEXT_PUBLIC_SENTRY_DSN`/`SENTRY_DSN` from env, none
+   * hardcode a value), so none is invented here either.
+   */
+  SENTRY_DSN?: string;
+  /**
    * [RELAY-12] Per-environment override for the ingest body-size cap, in bytes. Absent
    * (the normal case) falls back to `MAX_BODY_BYTES` (1 MiB) in `routes/ingest.ts`. Must
    * parse as a positive integer; an unset, empty, or malformed value falls back to the
