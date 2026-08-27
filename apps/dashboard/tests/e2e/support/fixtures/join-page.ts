@@ -18,7 +18,13 @@ export class JoinPage {
   ) {
     this.nameBox = this.page.getByPlaceholder('Your Name');
     this.teamNameBox = this.page.getByPlaceholder('Team Name');
-    this.emailBox = this.page.getByPlaceholder('example@boxyhq.com');
+    // [Found 2026-08-27, verifying RELAY-57] Locale string is
+    // `locales/en/common.json`'s `email-placeholder` — rebranded to
+    // `example@coreframe-labs.dev` as part of the BoxyHQ->Coreframe branding pass
+    // (RELAY-104) but this fixture was never updated, so any run against a real
+    // (post-rebrand) build or production has been silently broken at this exact
+    // line since that rebrand landed.
+    this.emailBox = this.page.getByPlaceholder('example@coreframe-labs.dev');
     this.passwordBox = this.page.getByPlaceholder('Password');
     this.createAccountButton = page.getByRole('button', {
       name: 'Create Account',
