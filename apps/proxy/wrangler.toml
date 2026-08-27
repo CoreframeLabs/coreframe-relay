@@ -29,12 +29,17 @@ vars = { ENVIRONMENT = "production" }
 name = "coreframe-relay-proxy-staging"
 vars = { ENVIRONMENT = "staging" }
 
-# KV for idempotency keys and the route-lookup cache ([RELAY-4]). Declared but not yet
-# bound — `wrangler kv namespace create` issues the ids, and inventing one here would
-# produce a config that looks complete and fails at deploy.
-# [[kv_namespaces]]
-# binding = "RELAY_KV"
-# id = "<issued by: wrangler kv namespace create RELAY_KV>"
+# KV for idempotency keys and the route-lookup cache ([RELAY-4], [RELAY-43]). Bound
+# 2026-08-27 — ids issued by `wrangler kv namespace create RELAY_KV --env <env>`, one
+# namespace per environment so a staging cache entry can never satisfy a production
+# lookup.
+[[env.production.kv_namespaces]]
+binding = "RELAY_KV"
+id = "4ba0bfda67454dbfb43a598c7975a1e0"
+
+[[env.staging.kv_namespaces]]
+binding = "RELAY_KV"
+id = "1c4f5dd24c1a4ef99ca553130b206490"
 
 # [RELAY-13] Per-team, per-PLAN ingestion rate limiters.
 #
