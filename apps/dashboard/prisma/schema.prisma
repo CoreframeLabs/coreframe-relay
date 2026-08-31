@@ -120,6 +120,22 @@ model Team {
   /// the correct default for every existing row: this check did not exist before
   /// this ticket, so no historical team was ever evaluated against it.
   isInternal          Boolean      @default(false)
+  /// [RELAY-48] Per-team Slack webhook for DLQ alerts. Nullable, no default, and — as of
+  /// this ticket — there is no settings UI that writes it, so it is NULL for every team
+  /// that exists today. That is not a bug in this column; it is the honest current state,
+  /// and it is exactly what makes the DLQ email fallback in `lib/relay/dlqNotify.ts` fire
+  /// unconditionally right now — the AC is "fires when a route has NO Slack webhook
+  /// configured", and today that is every route, every time, because the column this
+  /// check reads has never been set. A future ticket that ships the settings UI narrows
+  /// the fallback's trigger automatically, with no change needed here.
+  ///
+  /// Deliberately distinct from `SLACK_WEBHOOK_URL` in `lib/env.ts` — that is Coreframe's
+  /// OWN internal ops alert channel (`lib/slack.ts`, fired on new signups in
+  /// `pages/api/auth/join.ts` and account lockouts in `lib/nextAuth.ts`), global to the
+  /// deployment and with no per-team scoping at all. Conflating the two would mean a
+  /// customer's dead-lettered webhook posts into Coreframe's own internal Slack, which is
+  /// both wrong and a data leak across tenants.
+  slackWebhookUrl String?
   createdAt       DateTime     @default(now())
   updatedAt       DateTime     @default(now())
   members         TeamMember[]
