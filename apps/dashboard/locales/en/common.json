@@ -224,6 +224,8 @@
   "n8n-wedge-title": "n8n Reliability — $19/month",
   "n8n-wedge-description": "A single flat tier: point your webhooks at a Relay route, set the route's destination to your n8n workflow, and Relay retries and holds deliveries in a DLQ instead of letting them vanish.",
   "n8n-wedge-cta": "Pay with Stripe",
+  "no-active-subscription-title": "No active subscription",
+  "no-active-subscription-description": "You're on the Free tier. Subscribe below to unlock the paid tier and manage billing, upgrades, and cancellation from the Stripe Customer Portal.",
   "need-anything-else": "Need anything else?",
   "billing-assistance-message": "If you require additional assistance regarding billing, our team is readily available to provide support.",
   "contact-support": "Contact Support",

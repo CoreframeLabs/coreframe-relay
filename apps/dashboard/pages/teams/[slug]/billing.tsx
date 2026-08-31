@@ -11,6 +11,7 @@ import { TeamTab } from '@/components/team';
 import Help from '@/components/billing/Help';
 import { Error, Loading } from '@/components/shared';
 import LinkToPortal from '@/components/billing/LinkToPortal';
+import UpgradePrompt from '@/components/billing/UpgradePrompt';
 import Subscriptions from '@/components/billing/Subscriptions';
 import ProductPricing from '@/components/billing/ProductPricing';
 import N8nWedgePaymentLink from '@/components/billing/N8nWedgePaymentLink';
@@ -38,6 +39,14 @@ const Payments = ({ teamFeatures, n8nWedgePaymentLink }) => {
 
   const plans = data?.data?.products || [];
   const subscriptions = data?.data?.subscriptions || [];
+  // [RELAY-49, AC5] "Paid nav" split: a team with no active Subscription row is
+  // Free-tier by definition (matching the same real-vs-cached distinction
+  // create-portal-link.ts's own gate now enforces server-side) — it sees an
+  // upgrade prompt instead of a "Manage subscription" control that would open a
+  // real Stripe portal with nothing in it.
+  const hasActiveSubscription = subscriptions.some(
+    (s: { active?: boolean }) => s.active
+  );
 
   return (
     <>
@@ -50,7 +59,11 @@ const Payments = ({ teamFeatures, n8nWedgePaymentLink }) => {
           />
 
           <div className="flex gap-6 flex-col md:flex-row">
-            <LinkToPortal team={team} />
+            {hasActiveSubscription ? (
+              <LinkToPortal team={team} />
+            ) : (
+              <UpgradePrompt />
+            )}
             <Help />
           </div>
 
