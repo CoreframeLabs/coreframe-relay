@@ -1,0 +1,21 @@
+-- [RELAY-48] DLQ email fallback — per-team Slack webhook column.
+--
+-- Purely additive: one new nullable TEXT column on an existing table (Team), same shape
+-- as 20260825130000_relay_68_team_attribution's attributionSource/Medium/Campaign — no
+-- single correct value exists for a team that predates this column, so NULL ("no Slack
+-- webhook configured") is the only honest default and there is deliberately no
+-- `DEFAULT` clause.
+--
+-- This is the field the DLQ email fallback in `lib/relay/dlqNotify.ts` reads: when a
+-- route's team has no `slackWebhookUrl`, a dead-lettered delivery emails the team owner
+-- instead. No settings UI writes this column yet (real future work, out of this
+-- ticket's scope), so today every existing team reads back NULL and the fallback fires
+-- unconditionally — which is the correct behavior for the acceptance criterion as
+-- written, not a gap.
+--
+-- Grants: no change needed. relay_app already holds
+-- `GRANT SELECT, INSERT, UPDATE, DELETE ON ALL TABLES IN SCHEMA public` from
+-- 20260804120000_relay_app_login_and_grants.sql, which is table-level and therefore
+-- already covers this new column on the existing Team table.
+
+ALTER TABLE "Team" ADD COLUMN "slackWebhookUrl" TEXT;

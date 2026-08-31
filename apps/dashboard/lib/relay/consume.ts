@@ -15,6 +15,7 @@ import {
 } from 'models/delivery';
 import { recordDlqItem } from 'models/dlq';
 import { fetchRouteForDelivery } from 'models/route';
+import { notifyDlqFallback } from '@/lib/relay/dlqNotify';
 
 /**
  * The pipeline's delivery half, extracted from `pages/api/relay/qstash.ts` so the same
@@ -199,11 +200,13 @@ export async function consumeEnvelope(
       }
 
       if (isFinalAttempt) {
-        await recordDlqItem({
+        const dlqFailReason = outcome.failReason ?? 'delivery failed';
+
+        const { duplicate } = await recordDlqItem({
           teamId,
           routeId,
           requestId,
-          failReason: outcome.failReason ?? 'delivery failed',
+          failReason: dlqFailReason,
           attemptCount,
           body,
           // [RELAY-65] The headers of the attempt that failed for the last time.
@@ -229,6 +232,26 @@ export async function consumeEnvelope(
         });
 
         if (!isTest) recordMetric('delivery.dlq');
+
+        // [RELAY-48] Awaited, not fire-and-forget — a Vercel function can be frozen
+        // the instant the response is sent, and an un-awaited promise here would race
+        // that freeze and might never actually send. `notifyDlqFallback` swallows every
+        // error itself (see its own doc comment), so awaiting it can never turn this
+        // successful DLQ write into a 500 QStash would retry against a destination
+        // already given up on — it can only add latency, never fail this response.
+        // Skipped for a duplicate write (the item already existed, so a notification for
+        // it already fired once) and for `isTest` traffic (the "Send test webhook"
+        // button should not email a real team owner — same exclusion `recordMetric`
+        // already applies a few lines up).
+        if (!isTest && !duplicate) {
+          await notifyDlqFallback({
+            teamId,
+            routeId,
+            requestId,
+            failReason: dlqFailReason,
+          });
+        }
+
         return res.status(200).json({ status: 'dlq', requestId });
       }
 

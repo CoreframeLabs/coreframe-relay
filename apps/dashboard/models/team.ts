@@ -206,6 +206,36 @@ export async function getTeamRoles(userId: string) {
   });
 }
 
+/**
+ * [RELAY-48] The team's OWNER's email — the DLQ email fallback's recipient.
+ *
+ * `createTeam` above adds exactly one `Role.OWNER` member at creation time, so every
+ * team has one; `orderBy: createdAt: asc` picks the original if a schema change ever
+ * let a second OWNER row exist. Falls back to the earliest ADMIN only for a state this
+ * codebase does not currently produce (an owner removed without a new one assigned) —
+ * a notification silently going nowhere is worse than reaching a team-scoped admin
+ * instead of the owner.
+ */
+export async function fetchTeamOwnerEmail(
+  teamId: string
+): Promise<string | null> {
+  const owner = await prisma.teamMember.findFirst({
+    where: { teamId, role: Role.OWNER },
+    orderBy: { createdAt: 'asc' },
+    select: { user: { select: { email: true } } },
+  });
+  if (owner) {
+    return owner.user.email;
+  }
+
+  const admin = await prisma.teamMember.findFirst({
+    where: { teamId, role: Role.ADMIN },
+    orderBy: { createdAt: 'asc' },
+    select: { user: { select: { email: true } } },
+  });
+  return admin?.user.email ?? null;
+}
+
 // Check if the user is an admin or owner of the team
 export async function isTeamAdmin(userId: string, teamId: string) {
   const teamMember = await prisma.teamMember.findUniqueOrThrow({
