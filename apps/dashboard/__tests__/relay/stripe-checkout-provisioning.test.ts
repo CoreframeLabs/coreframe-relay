@@ -13,7 +13,7 @@
  */
 
 import { handleCheckoutSessionCompleted } from 'pages/api/webhooks/stripe';
-import { getTeam, getTeams, updateTeam } from 'models/team';
+import { getByCustomerId, getTeam, getTeams, updateTeam } from 'models/team';
 import { prisma } from 'lib/prisma';
 import type Stripe from 'stripe';
 
@@ -30,6 +30,18 @@ jest.mock('models/team', () => ({
   getTeam: jest.fn(),
   getTeams: jest.fn(),
   updateTeam: jest.fn(),
+  // [RELAY-49] handleCheckoutSessionCompleted's success paths now also call
+  // syncTeamPlanForCustomer, which looks the team up again by customerId —
+  // defaults to "no team" so it's a safe no-op unless a test opts in.
+  getByCustomerId: jest.fn(),
+}));
+
+// [RELAY-49] syncTeamPlanForCustomer also reads Subscription rows by customerId
+// to decide Team.plan — mocked out so this suite (which is testing
+// handleCheckoutSessionCompleted's own branching, not entitlement sync) never
+// touches a real Prisma client.
+jest.mock('models/subscription', () => ({
+  getByCustomerId: jest.fn(),
 }));
 
 jest.mock('lib/prisma', () => ({
@@ -43,6 +55,7 @@ jest.mock('lib/prisma', () => ({
 const mockGetTeam = getTeam as jest.Mock;
 const mockGetTeams = getTeams as jest.Mock;
 const mockUpdateTeam = updateTeam as jest.Mock;
+const mockGetByCustomerId = getByCustomerId as jest.Mock;
 const mockFindUniqueUser = prisma.user.findUnique as jest.Mock;
 
 function makeSession(overrides: Partial<Stripe.Checkout.Session> = {}): Stripe.Event {
@@ -191,6 +204,67 @@ describe('[stripe webhook] handleCheckoutSessionCompleted — pay-path provision
     );
 
     expect(mockUpdateTeam).toHaveBeenCalledWith('team-recovered', {
+      billingId: 'cus_test_123',
+      billingProvider: 'stripe',
+    });
+  });
+
+  // [RELAY-49, AC3] Proves the out-of-order-webhook fix: if
+  // `customer.subscription.created` already landed for this customer (so a real,
+  // active Subscription row exists in the DB by the time this checkout-completed
+  // event is processed), linking billingId must also flip Team.plan to PRO in
+  // the same pass — a team must never wait indefinitely on a second webhook that
+  // has already arrived.
+  it('syncs Team.plan to PRO when linking billingId to a customer who already has an active subscription row', async () => {
+    mockGetTeam.mockResolvedValue({ id: 'team-9', slug: 'team-nine' });
+    // The second call (inside syncTeamPlanForCustomer) re-fetches the team by
+    // customerId, post-link, to read its current `plan` — simulate the
+    // just-linked, still-FREE team the same way the real DB would return it.
+    mockGetByCustomerId.mockResolvedValue({
+      id: 'team-9',
+      slug: 'team-nine',
+      plan: 'FREE',
+    });
+    const { getByCustomerId: mockSubGetByCustomerId } = jest.requireMock(
+      'models/subscription'
+    ) as { getByCustomerId: jest.Mock };
+    mockSubGetByCustomerId.mockResolvedValue([
+      { id: 'sub_test_1', customerId: 'cus_test_123', active: true },
+    ]);
+
+    await handleCheckoutSessionCompleted(
+      makeSession({ client_reference_id: 'team-9' })
+    );
+
+    expect(mockUpdateTeam).toHaveBeenCalledWith('team-nine', {
+      billingId: 'cus_test_123',
+      billingProvider: 'stripe',
+    });
+    expect(mockUpdateTeam).toHaveBeenCalledWith('team-nine', { plan: 'PRO' });
+  });
+
+  it('does NOT write Team.plan again when it already matches the derived plan — idempotent, not a redundant write every event', async () => {
+    mockGetTeam.mockResolvedValue({ id: 'team-10', slug: 'team-ten' });
+    mockGetByCustomerId.mockResolvedValue({
+      id: 'team-10',
+      slug: 'team-ten',
+      plan: 'PRO',
+    });
+    const { getByCustomerId: mockSubGetByCustomerId } = jest.requireMock(
+      'models/subscription'
+    ) as { getByCustomerId: jest.Mock };
+    mockSubGetByCustomerId.mockResolvedValue([
+      { id: 'sub_test_2', customerId: 'cus_test_123', active: true },
+    ]);
+
+    await handleCheckoutSessionCompleted(
+      makeSession({ client_reference_id: 'team-10' })
+    );
+
+    // Only the billingId link write happens — no second `updateTeam` call for
+    // `plan`, since the team was already PRO.
+    expect(mockUpdateTeam).toHaveBeenCalledTimes(1);
+    expect(mockUpdateTeam).toHaveBeenCalledWith('team-ten', {
       billingId: 'cus_test_123',
       billingProvider: 'stripe',
     });

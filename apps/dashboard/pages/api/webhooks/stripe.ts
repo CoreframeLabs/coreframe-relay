@@ -6,11 +6,13 @@ import type { Readable } from 'node:stream';
 import {
   createStripeSubscription,
   deleteStripeSubscription,
+  getByCustomerId as getSubscriptionsByCustomerId,
   getBySubscriptionId,
   updateStripeSubscription,
 } from 'models/subscription';
 import { getByCustomerId, getTeam, getTeams, updateTeam } from 'models/team';
 import { prisma } from '@/lib/prisma';
+import { Plan } from '@prisma/client';
 
 export const config = {
   api: {
@@ -36,6 +38,15 @@ const relevantEvents: Stripe.Event.Type[] = [
   'customer.subscription.deleted',
 ];
 
+// [RELAY-49, AC5] Invalid/missing signatures must return 401 with a generic body —
+// never the raw Stripe SDK error message (which can describe exactly why
+// verification failed, e.g. body-parsing details), and never a bare `return` with
+// no status (that previously left the Next.js API route hanging with no response
+// sent at all, since neither `res.status().json()` nor `res.end()` was ever called).
+// The real reason is still logged server-side (Vercel function logs) for debugging —
+// it is withheld from the response body only, not lost.
+const INVALID_SIGNATURE_RESPONSE = { error: { message: 'Invalid signature' } };
+
 export default async function POST(req: NextApiRequest, res: NextApiResponse) {
   const rawBody = await getRawBody(req);
 
@@ -43,13 +54,31 @@ export default async function POST(req: NextApiRequest, res: NextApiResponse) {
   const { webhookSecret } = env.stripe;
   let event: Stripe.Event;
 
+  if (!sig || !webhookSecret) {
+    console.error(
+      JSON.stringify({
+        level: 'error',
+        event: 'stripe.webhook_signature_invalid',
+        reason: !sig ? 'missing_signature_header' : 'missing_webhook_secret',
+      })
+    );
+    return res.status(401).json(INVALID_SIGNATURE_RESPONSE);
+  }
+
   try {
-    if (!sig || !webhookSecret) {
-      return;
-    }
     event = stripe.webhooks.constructEvent(rawBody, sig, webhookSecret);
   } catch (err: any) {
-    return res.status(400).json({ error: { message: err.message } });
+    console.error(
+      JSON.stringify({
+        level: 'error',
+        event: 'stripe.webhook_signature_invalid',
+        reason: 'verification_failed',
+        // the underlying Stripe SDK message is diagnostic-only — it never reaches
+        // the HTTP response, only Vercel's own function logs.
+        detail: err.message,
+      })
+    );
+    return res.status(401).json(INVALID_SIGNATURE_RESPONSE);
   }
 
   if (relevantEvents.includes(event.type)) {
@@ -65,9 +94,7 @@ export default async function POST(req: NextApiRequest, res: NextApiResponse) {
           await handleSubscriptionUpdated(event);
           break;
         case 'customer.subscription.deleted':
-          await deleteStripeSubscription(
-            (event.data.object as Stripe.Subscription).id
-          );
+          await handleSubscriptionDeleted(event);
           break;
         default:
           throw new Error('Unhandled relevant event!');
@@ -137,6 +164,13 @@ export async function handleCheckoutSessionCompleted(event: Stripe.Event) {
         billingId: customerId,
         billingProvider: 'stripe',
       });
+      // [RELAY-49, AC3] Webhook delivery order isn't guaranteed — if
+      // `customer.subscription.created` already arrived for this customerId
+      // before this event linked it to a team, that earlier handler's own
+      // `syncTeamPlanForCustomer` call would have found no team yet and been a
+      // silent no-op. Re-run it now that the link exists, so a team isn't left
+      // on FREE indefinitely just because the two events arrived out of order.
+      await syncTeamPlanForCustomer(customerId);
       return;
     }
   }
@@ -213,9 +247,55 @@ export async function handleCheckoutSessionCompleted(event: Stripe.Event) {
     billingId: customerId,
     billingProvider: 'stripe',
   });
+  // See the comment on the client_reference_id path above — same out-of-order
+  // webhook-delivery reasoning applies to the email-fallback link.
+  await syncTeamPlanForCustomer(customerId);
 }
 
-async function handleSubscriptionUpdated(event: Stripe.Event) {
+// [RELAY-49, AC3] Statuses that count as "paying" for entitlement purposes. This
+// tier has no trial (pricing.tsx: "no trial clock"), but `trialing` is included
+// defensively for any future price that does add one — Stripe's own docs treat
+// trialing subscriptions as entitled to the product. Every other status
+// (canceled, incomplete, incomplete_expired, past_due, paused, unpaid) is NOT
+// paying: a subscription that failed to activate, fell behind on payment, or
+// was cancelled must not leave a team on the paid plan.
+// Stripe.Subscription.Status = "active" | "canceled" | "incomplete" |
+//   "incomplete_expired" | "past_due" | "paused" | "trialing" | "unpaid"
+const ENTITLED_STATUSES: Stripe.Subscription.Status[] = ['active', 'trialing'];
+
+export function isEntitledStatus(status: Stripe.Subscription.Status): boolean {
+  return ENTITLED_STATUSES.includes(status);
+}
+
+// Writes Team.plan from real subscription state, closing the gap RELAY-13 left
+// open on purpose ("nothing currently sets this to PRO" — see the schema
+// comment): the proxy's per-plan rate limiter (`apps/proxy/src/middleware/rateLimit.ts`)
+// already reads `team.plan` and defaults every team to the most restrictive
+// (FREE) tier forever, because nothing in the billing path ever wrote PRO. This
+// is the write side of that mechanism — it does not invent a new tier ladder,
+// it activates the one that already exists in the schema and the proxy.
+//
+// Idempotent and safe to call on every subscription event, including ones for a
+// customer with no linked team yet (a Payment-Link purchase whose
+// checkout.session.completed hasn't been processed, or arrived out of order —
+// webhooks are not guaranteed to arrive in order): `getByCustomerId` returning
+// null is a normal, silent no-op, not an error.
+export async function syncTeamPlanForCustomer(customerId: string) {
+  const team = await getByCustomerId(customerId);
+  if (!team) {
+    return;
+  }
+
+  const subscriptions = await getSubscriptionsByCustomerId(customerId);
+  const hasActiveSubscription = subscriptions.some((s) => s.active);
+  const nextPlan = hasActiveSubscription ? Plan.PRO : Plan.FREE;
+
+  if (team.plan !== nextPlan) {
+    await updateTeam(team.slug, { plan: nextPlan });
+  }
+}
+
+export async function handleSubscriptionUpdated(event: Stripe.Event) {
   const {
     cancel_at,
     id,
@@ -233,35 +313,57 @@ async function handleSubscriptionUpdated(event: Stripe.Event) {
       return;
     } else {
       await handleSubscriptionCreated(event);
+      return;
     }
-  } else {
-    const priceId = items.data.length > 0 ? items.data[0].plan?.id : '';
-    //type Stripe.Subscription.Status = "active" | "canceled" | "incomplete" | "incomplete_expired" | "past_due" | "paused" | "trialing" | "unpaid"
-    await updateStripeSubscription(id, {
-      active: status === 'active',
-      endDate: current_period_end
-        ? new Date(current_period_end * 1000)
-        : undefined,
-      startDate: current_period_start
-        ? new Date(current_period_start * 1000)
-        : undefined,
-      cancelAt: cancel_at ? new Date(cancel_at * 1000) : undefined,
-      priceId,
-    });
   }
+
+  const priceId = items.data.length > 0 ? items.data[0].plan?.id : '';
+  await updateStripeSubscription(id, {
+    active: isEntitledStatus(status),
+    endDate: current_period_end
+      ? new Date(current_period_end * 1000)
+      : undefined,
+    startDate: current_period_start
+      ? new Date(current_period_start * 1000)
+      : undefined,
+    cancelAt: cancel_at ? new Date(cancel_at * 1000) : undefined,
+    priceId,
+  });
+
+  await syncTeamPlanForCustomer(customer as string);
 }
 
-async function handleSubscriptionCreated(event: Stripe.Event) {
-  const { customer, id, current_period_start, current_period_end, items } =
+export async function handleSubscriptionCreated(event: Stripe.Event) {
+  const { customer, id, status, current_period_start, current_period_end, items } =
     event.data.object as Stripe.Subscription;
 
   await createStripeSubscription({
     customerId: customer as string,
     id,
 
-    active: true,
+    // Was previously hardcoded `true` regardless of the subscription's real
+    // status — a `customer.subscription.created` event can carry a status other
+    // than `active` (e.g. `incomplete`, when the initial payment requires 3DS
+    // authentication that hasn't completed yet), and hardcoding `true` would
+    // have marked a team as paying before they'd actually paid.
+    active: isEntitledStatus(status),
     startDate: new Date(current_period_start * 1000),
     endDate: new Date(current_period_end * 1000),
     priceId: items.data.length > 0 ? items.data[0].plan?.id : '',
   });
+
+  await syncTeamPlanForCustomer(customer as string);
+}
+
+export async function handleSubscriptionDeleted(event: Stripe.Event) {
+  const { id, customer } = event.data.object as Stripe.Subscription;
+
+  await deleteStripeSubscription(id);
+  // A team can only be downgraded once its actually-remaining subscriptions
+  // are considered — re-derives from the database rather than assuming "this
+  // was the only one", so a plan change (old subscription cancelled, new one
+  // already active) never gets clobbered back to FREE by the old one's own
+  // deletion event arriving after the new one's creation event (webhook
+  // delivery order is not guaranteed).
+  await syncTeamPlanForCustomer(customer as string);
 }
