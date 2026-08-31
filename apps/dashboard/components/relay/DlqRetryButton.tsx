@@ -153,9 +153,9 @@ export function DlqRetryButton({
           <DialogHeader>
             <DialogTitle>Re-send this webhook?</DialogTitle>
             <DialogDescription>
-              This publishes the stored payload back to QStash, which will POST
-              it to the route&apos;s destination. It cannot be undone, and Relay
-              allows it once per item.
+              This re-queues the stored payload for delivery to the route&apos;s
+              destination. It cannot be undone, and Relay allows it once per
+              item.
             </DialogDescription>
           </DialogHeader>
 
@@ -241,7 +241,7 @@ export function DlqRetryButton({
             >
               {outcome.kind === 'queued' ? (
                 <>
-                  Queued with QStash
+                  Queued for delivery
                   {outcome.messageId ? ` (${outcome.messageId})` : ''}. Delivery
                   is asynchronous — watch the delivery log for the result.
                 </>

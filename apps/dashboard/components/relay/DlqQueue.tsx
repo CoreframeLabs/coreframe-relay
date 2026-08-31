@@ -66,9 +66,8 @@ export function DlqQueue() {
           Dead letter queue
         </h1>
         <p className="mt-1 max-w-2xl text-sm text-muted-foreground">
-          Webhooks that failed every delivery attempt. Retrying republishes the
-          stored payload to QStash, which delivers it to the route&apos;s
-          destination again.
+          Webhooks that failed every delivery attempt. Retrying re-queues the
+          stored payload for delivery to the route&apos;s destination again.
         </p>
       </div>
 
