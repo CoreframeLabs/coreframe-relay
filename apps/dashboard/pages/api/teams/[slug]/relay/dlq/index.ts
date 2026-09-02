@@ -1,8 +1,10 @@
 import type { NextApiRequest, NextApiResponse } from 'next';
-import { getCurrentUserWithTeam, throwIfNoTeamAccess } from 'models/team';
+import { throwIfNoTeamAccess } from 'models/team';
 import { throwIfNotAllowed } from 'models/user';
 import { fetchDlqItemsForTeam } from 'models/dlq';
 import { withTeamScope } from '@/lib/db/scope';
+
+type TeamAccess = Awaited<ReturnType<typeof throwIfNoTeamAccess>>;
 
 /**
  * GET /api/teams/:slug/relay/dlq — every DLQ item for the team, newest first. [RELAY-8]
@@ -37,10 +39,16 @@ export default async function handler(
     // team scope, or the six protected tables return zero rows once the app
     // connects as `relay_app`. The id comes from the membership this check just
     // verified — never from the request.
+    //
+    // [perf] `teamMember` (not a fresh `getCurrentUserWithTeam(req, res)` call) is what
+    // gets passed to `handleGET`: the latter reruns `getSession` and the identical
+    // TeamMember⋈Team query `throwIfNoTeamAccess` just made. Same fix as `routes/index.ts`
+    // and `log-stream.ts`, applied here for the same reason — this list is what the DLQ
+    // page's first paint waits on.
     await withTeamScope(teamMember.teamId, async () => {
       switch (req.method) {
       case 'GET':
-        await handleGET(req, res);
+        await handleGET(req, res, teamMember);
         break;
       default:
         res.setHeader('Allow', 'GET');
@@ -56,11 +64,14 @@ export default async function handler(
   }
 }
 
-const handleGET = async (req: NextApiRequest, res: NextApiResponse) => {
-  const user = await getCurrentUserWithTeam(req, res);
-  throwIfNotAllowed(user, 'team', 'read');
+const handleGET = async (
+  req: NextApiRequest,
+  res: NextApiResponse,
+  teamMember: TeamAccess
+) => {
+  throwIfNotAllowed(teamMember, 'team', 'read');
 
-  const items = await fetchDlqItemsForTeam(user.team.id, MAX_ROWS);
+  const items = await fetchDlqItemsForTeam(teamMember.team.id, MAX_ROWS);
 
   // No `recordMetric` here, deliberately. `AppEvent` is a closed union in `types/base.ts`
   // and has no `dlq.fetched` member; the nearest existing event, `delivery.dlq`, means "a

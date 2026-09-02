@@ -1,6 +1,6 @@
 import type { NextApiRequest, NextApiResponse } from 'next';
 import { z } from 'zod';
-import { getCurrentUserWithTeam, throwIfNoTeamAccess } from 'models/team';
+import { throwIfNoTeamAccess } from 'models/team';
 import { throwIfNotAllowed } from 'models/user';
 import { createRoute, fetchRoutes, relayUrlFor } from 'models/route';
 import { recordAuditEvent } from '@/lib/audit';
@@ -17,7 +17,19 @@ import { DestinationUrlSchema } from '@coreframe-relay/types';
  * per-method handler) so authorization behaves identically to every other team resource.
  * `throwIfNoTeamAccess` is what scopes the request to a team the caller belongs to;
  * everything below it uses that team's id and never one from the request body.
+ *
+ * [perf] `handleGET`/`handlePOST` take the `TeamAccess` `throwIfNoTeamAccess` already
+ * resolved instead of calling `getCurrentUserWithTeam(req, res)` again. That second call
+ * re-ran `getSession` AND `getTeamMember` — the exact same TeamMember⋈Team query
+ * `throwIfNoTeamAccess` had just run — for no different answer: `getTeamMember`'s
+ * `include: { team: true }` already gives `throwIfNoTeamAccess`'s return value the same
+ * `.team` and `.role` `getCurrentUserWithTeam` recomputes. Measured on production against
+ * this exact team-scoped-GET shape (`log-stream.ts`, same duplicate pattern): the two
+ * sequential `getTeamMember` round trips were part of a ~370-410ms time-to-first-byte on a
+ * request that blocks page content. Dropping the duplicate here removes one full DB round
+ * trip from every Routes-page load with no change in who is authorized to do what.
  */
+type TeamAccess = Awaited<ReturnType<typeof throwIfNoTeamAccess>>;
 
 const createRouteSchema = z.object({
   name: z.string().trim().min(1, 'Name is required').max(64),
@@ -47,10 +59,10 @@ export default async function handler(
     await withTeamScope(teamMember.teamId, async () => {
       switch (req.method) {
         case 'GET':
-          await handleGET(req, res);
+          await handleGET(req, res, teamMember);
           break;
         case 'POST':
-          await handlePOST(req, res);
+          await handlePOST(req, res, teamMember);
           break;
         default:
           res.setHeader('Allow', 'GET, POST');
@@ -66,11 +78,14 @@ export default async function handler(
   }
 }
 
-const handleGET = async (req: NextApiRequest, res: NextApiResponse) => {
-  const user = await getCurrentUserWithTeam(req, res);
-  throwIfNotAllowed(user, 'team', 'read');
+const handleGET = async (
+  req: NextApiRequest,
+  res: NextApiResponse,
+  teamMember: TeamAccess
+) => {
+  throwIfNotAllowed(teamMember, 'team', 'read');
 
-  const routes = await fetchRoutes(user.team.id);
+  const routes = await fetchRoutes(teamMember.team.id);
 
   recordMetric('route.fetched');
 
@@ -85,22 +100,25 @@ const handleGET = async (req: NextApiRequest, res: NextApiResponse) => {
       status: route.status,
       createdAt: route.createdAt,
       updatedAt: route.updatedAt,
-      relayUrl: relayUrlFor(user.team.slug, route.slug, route.ingestToken),
+      relayUrl: relayUrlFor(teamMember.team.slug, route.slug, route.ingestToken),
     })),
   });
 };
 
-const handlePOST = async (req: NextApiRequest, res: NextApiResponse) => {
-  const user = await getCurrentUserWithTeam(req, res);
+const handlePOST = async (
+  req: NextApiRequest,
+  res: NextApiResponse,
+  teamMember: TeamAccess
+) => {
   // Creating an ingestion endpoint changes what the team accepts from the internet, so it
   // is an update-level permission, not a read.
-  throwIfNotAllowed(user, 'team', 'update');
+  throwIfNotAllowed(teamMember, 'team', 'update');
 
   const { name, destination, maxRetries, destinationHeaders } =
     validateWithSchema(createRouteSchema, req.body);
 
   const route = await createRoute({
-    teamId: user.team.id,
+    teamId: teamMember.team.id,
     name,
     destination,
     maxRetries,
@@ -108,9 +126,9 @@ const handlePOST = async (req: NextApiRequest, res: NextApiResponse) => {
   });
 
   await recordAuditEvent({
-    teamId: user.team.id,
+    teamId: teamMember.team.id,
     event: 'route.created',
-    actor: user.email,
+    actor: teamMember.user.email,
     target: route.id,
     // Destination is recorded deliberately: "where did our webhooks start going, and who
     // pointed them there" is the question an audit trail exists to answer.
@@ -139,7 +157,7 @@ const handlePOST = async (req: NextApiRequest, res: NextApiResponse) => {
       createdAt: route.createdAt,
       updatedAt: route.updatedAt,
       // [RELAY-57] the ingest token is safe to surface here — the wizard needs the URL.
-      relayUrl: relayUrlFor(user.team.slug, route.slug, route.ingestToken),
+      relayUrl: relayUrlFor(teamMember.team.slug, route.slug, route.ingestToken),
       // [RELAY-59] names only, never values, never ciphertext.
       destinationHeaderNames: destinationHeaders
         ? Object.keys(destinationHeaders).sort()

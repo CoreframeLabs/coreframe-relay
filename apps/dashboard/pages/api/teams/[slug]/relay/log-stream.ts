@@ -2,7 +2,7 @@ import type { NextApiRequest, NextApiResponse } from 'next';
 import { z } from 'zod';
 import { DeliveryStatus } from '@prisma/client';
 
-import { getCurrentUserWithTeam, throwIfNoTeamAccess } from 'models/team';
+import { throwIfNoTeamAccess } from 'models/team';
 import { throwIfNotAllowed } from 'models/user';
 import {
   DELIVERY_FEED_MAX_ROWS,
@@ -148,18 +148,29 @@ export default async function handler(
 
     const teamMember = await throwIfNoTeamAccess(req, res);
 
-    // [RELAY-84] Opened here rather than around the fetch alone, so that BOTH the
-    // initial snapshot and the chained poll timer scheduled at the end of this
-    // callback are created inside the store. See the header comment for why that
-    // is sufficient for the timer chain and why `tick` re-scopes anyway.
+    // [perf] This used to also call `getCurrentUserWithTeam(req, res)` here, which
+    // re-ran `getSession` and the exact same TeamMember⋈Team query `throwIfNoTeamAccess`
+    // just ran, for the identical answer -- `getTeamMember`'s `include: { team: true }`
+    // already put `.team` and `.role` on `teamMember`. That second query sat on this
+    // handler's blocking path: nothing is written to the client (not even response
+    // headers) until it resolves, because the SSE stream cannot open before the initial
+    // snapshot is known. Measured on production (Playwright, real session, real network):
+    // this endpoint's time-to-first-byte was ~370-410ms across 6 navigations from
+    // Routes to Delivery Log, the slowest single request in that transition. Dropping the
+    // duplicate removes one full DB round trip from that critical path with no change to
+    // who is authorized -- `throwIfNoTeamAccess` already verified the same membership.
+    //
+    // [RELAY-84] `withTeamScope` is opened here rather than around the fetch alone, so
+    // that BOTH the initial snapshot and the chained poll timer scheduled at the end of
+    // this callback are created inside the store. See the header comment for why that is
+    // sufficient for the timer chain and why `tick` re-scopes anyway.
     await withTeamScope(teamMember.teamId, async () => {
-      const user = await getCurrentUserWithTeam(req, res);
-      throwIfNotAllowed(user, 'team', 'read');
+      throwIfNotAllowed(teamMember, 'team', 'read');
 
       const { routeId, status } = validateWithSchema(querySchema, req.query);
 
       // From the session's membership. Never from req.query, never from the body.
-      const teamId = user.team.id;
+      const teamId = teamMember.team.id;
       const filter = { routeId, status };
 
       // The first page of rows is fetched before any header goes out, so a database that is
