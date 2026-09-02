@@ -56,6 +56,7 @@
     "cookies-next": "6.1.1",
     "currency-symbol-map": "5.1.0",
     "formik": "2.4.9",
+    "framer-motion": "^13.1.1",
     "i18next": "25.10.9",
     "jose": "^6.2.8",
     "lucide-react": "^1.28.0",
@@ -78,6 +79,7 @@
     "stripe": "17.7.0",
     "swr": "2.4.1",
     "tailwind-merge": "^3.6.0",
+    "three": "^0.185.1",
     "yup": "1.7.1",
     "zod": "3.25.64"
   },
@@ -91,6 +93,7 @@
     "@types/node": "25.6.2",
     "@types/nodemailer": "7.0.4",
     "@types/react": "18.3.13",
+    "@types/three": "^0.185.4",
     "@typescript-eslint/eslint-plugin": "8.59.2",
     "@typescript-eslint/parser": "8.59.2",
     "autoprefixer": "10.4.27",
