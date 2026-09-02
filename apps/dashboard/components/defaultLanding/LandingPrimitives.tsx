@@ -54,12 +54,21 @@ export const LandingLink = ({
   variant = 'primary',
   className = '',
 }: LandingLinkProps) => {
-  const base = `inline-flex items-center justify-center gap-2 rounded-md px-5 py-3 text-sm font-semibold transition-colors ${focusRing}`;
+  // [design-overhaul 2026-08] `transition-colors` only animated the fill/border swap —
+  // every hover felt like a colour snap, not a response. `transition-[transform,colors,
+  // box-shadow]` (a plain `transition` for anything not explicitly excluded) plus a
+  // deliberately small lift (`-translate-y-px`, not a whole unit — this is a CTA button,
+  // not a card) and a press state (`active:translate-y-0`) is the same restrained pattern
+  // Linear and Vercel both use on their primary CTAs: motion communicates "this responded
+  // to you" without becoming the thing you notice first. `motion-reduce:` cancels the
+  // transform for `prefers-reduced-motion: reduce`, leaving the colour change (which is
+  // not a vestibular trigger) intact.
+  const base = `inline-flex items-center justify-center gap-2 rounded-md px-5 py-3 text-sm font-semibold transition duration-150 ease-out will-change-transform hover:-translate-y-px active:translate-y-0 active:duration-75 motion-reduce:transition-colors motion-reduce:hover:translate-y-0 ${focusRing}`;
 
   const styles =
     variant === 'primary'
-      ? 'bg-landing-accent text-landing-accent-ink hover:bg-landing-accent-hover'
-      : 'border border-landing-border bg-landing-surface text-landing-primary hover:border-landing-muted hover:bg-landing-elevated';
+      ? 'bg-landing-accent text-landing-accent-ink shadow-sm hover:bg-landing-accent-hover hover:shadow-md'
+      : 'border border-landing-border bg-landing-surface text-landing-primary hover:border-landing-muted hover:bg-landing-elevated hover:shadow-sm';
 
   return (
     <Link href={href} className={`${base} ${styles} ${className}`}>
@@ -115,8 +124,14 @@ export const Card = ({
   children: ReactNode;
   className?: string;
 }) => (
+  // [design-overhaul 2026-08] These cards aren't links or buttons, but a marketing page
+  // with zero hover feedback anywhere is exactly the "static" complaint this pass exists
+  // to fix — Linear and Vercel both give non-interactive feature cards a small hover
+  // response purely so the page feels alive under the cursor, not because the card does
+  // anything. Kept intentionally subtle: a hairline border shift + very slight lift, no
+  // scale, no colour change to the content.
   <div
-    className={`rounded-xl border border-landing-border bg-landing-surface/60 p-5 sm:p-6 ${className}`}
+    className={`rounded-xl border border-landing-border bg-landing-surface/60 p-5 transition duration-200 ease-out hover:-translate-y-0.5 hover:border-landing-muted hover:shadow-md motion-reduce:hover:translate-y-0 sm:p-6 ${className}`}
   >
     {children}
   </div>

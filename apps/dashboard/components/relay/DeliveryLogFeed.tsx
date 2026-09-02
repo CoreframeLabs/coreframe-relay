@@ -17,10 +17,12 @@ import { useDeliveryStream, type DeliveryRow } from './DeliveryStream';
 /**
  * Buffer → Delivery Log. relay-ui-ux-spec.md §3.3. [RELAY-7]
  *
- * Wrapped in `.dark` and the shadcn surface tokens for the same reason `BufferRoutes` is:
- * §1.1 is dark-mode-primary while the surrounding BoxyHQ chrome is daisyUI, and [RELAY-1]
- * deliberately did not emit shadcn's global `body` reset so Relay pages can be dark
- * without restyling every inherited page.
+ * [design-overhaul 2026-08] Used to force a `.dark` class on this wrapper regardless of
+ * the app's real theme — see `BufferRoutes.tsx`'s header for the full history. Removed
+ * here too. `DeliveryStreamStatus.tsx`'s state colours were retuned alongside this change
+ * (they were raw `-400` shades assuming a permanently dark ambient); everything else in
+ * this tree (`DeliveryTable`, `DeliveryDetail`, `DeliveryFilters`) already used
+ * theme-aware shadcn tokens.
  */
 
 /** Mirrors DELIVERY_FEED_MAX_ROWS in models/delivery.ts. The server enforces it too. */
@@ -93,7 +95,7 @@ export function DeliveryLogFeed() {
       : 'No deliveries match this filter.';
 
   return (
-    <div className="dark min-h-full bg-background p-6 text-foreground">
+    <div className="min-h-full bg-background p-6 text-foreground">
       <div className="mb-6 flex flex-wrap items-start justify-between gap-4">
         <div>
           <h1 className="text-2xl font-semibold tracking-tight">

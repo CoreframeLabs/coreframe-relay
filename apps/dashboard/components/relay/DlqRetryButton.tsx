@@ -140,16 +140,18 @@ export function DlqRetryButton({
       <Dialog open={open} onOpenChange={close}>
         {/*
           [RELAY-107] This is the "DLQ retry confirm" dialog spec §4.1 names directly as a
-          glass target. `components/ui/dialog.tsx`'s `DialogContent` now carries the glass
-          treatment by default (light base + `dark:` override), but the `dark` class right
-          here is self-applied to this same element rather than an ancestor, so Tailwind's
-          `dark:` variant (a `.dark <sel>` descendant-combinator selector) never matches it
-          — this dialog is deliberately always-dark regardless of the app's real theme
-          (same convention as `DeliveryDetail.tsx` and the rest of `components/relay/**`),
-          so the dark glass values are hardcoded here instead, overriding the shared
-          default's light `bg-white/70`/`border-white/60` via tailwind-merge.
+          glass target. `components/ui/dialog.tsx`'s `DialogContent` already carries the
+          glass treatment by default (light `bg-white/70`/`border-white/60`, `dark:`
+          override to `bg-[#191b20]/60`/`border-white/10`) toggled by the real `.dark`
+          class on `<html>`.
+
+          [design-overhaul 2026-08] This override used to force `dark` directly on this
+          element (rather than an ancestor), which made it always-dark regardless of the
+          app's real theme — the one dialog in the product that didn't respect the toggle
+          a user had just set. Removed: the shared `DialogContent` default is already
+          theme-aware and needs no per-callsite override, only the width.
         */}
-        <DialogContent className="dark sm:max-w-lg border-white/10 bg-[#191b20]/60">
+        <DialogContent className="sm:max-w-lg">
           <DialogHeader>
             <DialogTitle>Re-send this webhook?</DialogTitle>
             <DialogDescription>
@@ -195,7 +197,7 @@ export function DlqRetryButton({
                 failure, headers and all.
           */}
           {row.headersRetained ? (
-            <p className="flex gap-2 rounded-md border border-amber-500/30 bg-amber-500/5 p-3 text-xs text-amber-200">
+            <p className="flex gap-2 rounded-md border border-amber-300 bg-amber-50 p-3 text-xs text-amber-800 dark:border-amber-500/30 dark:bg-amber-500/5 dark:text-amber-200">
               <AlertTriangle
                 className="mt-0.5 h-4 w-4 shrink-0"
                 aria-hidden="true"
@@ -212,7 +214,7 @@ export function DlqRetryButton({
               </span>
             </p>
           ) : (
-            <p className="flex gap-2 rounded-md border border-amber-500/30 bg-amber-500/5 p-3 text-xs text-amber-200">
+            <p className="flex gap-2 rounded-md border border-amber-300 bg-amber-50 p-3 text-xs text-amber-800 dark:border-amber-500/30 dark:bg-amber-500/5 dark:text-amber-200">
               <AlertTriangle
                 className="mt-0.5 h-4 w-4 shrink-0"
                 aria-hidden="true"
@@ -235,8 +237,8 @@ export function DlqRetryButton({
               role="status"
               className={
                 outcome.kind === 'queued'
-                  ? 'rounded-md border border-green-500/30 bg-green-500/5 p-3 text-sm text-green-300'
-                  : 'rounded-md border border-red-500/30 bg-red-500/5 p-3 text-sm text-red-300'
+                  ? 'rounded-md border border-green-300 bg-green-50 p-3 text-sm text-green-800 dark:border-green-500/30 dark:bg-green-500/5 dark:text-green-300'
+                  : 'rounded-md border border-red-300 bg-red-50 p-3 text-sm text-red-800 dark:border-red-500/30 dark:bg-red-500/5 dark:text-red-300'
               }
             >
               {outcome.kind === 'queued' ? (
