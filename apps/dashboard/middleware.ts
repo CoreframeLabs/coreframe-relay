@@ -167,6 +167,37 @@ const localOnlyUnauthenticatedRoutes =
     ? []
     : ['/api/relay/qstash-test', '/api/relay/smoke-destination'];
 
+/**
+ * Stamp every outgoing response with CSP + the fixed security-header set.
+ *
+ * [security-hardening] Previously this only ran on the FINAL return of `middleware()` —
+ * the branch reached only by a request that (a) did not match `unAuthenticatedRoutes` /
+ * `localOnlyUnauthenticatedRoutes` AND (b) passed the session check. Every early return
+ * (the unauthenticated-allowlist bypass, and both auth-redirect branches) skipped this
+ * block entirely, which meant `/auth/login` itself — along with `/pricing`, `/docs`,
+ * `/terms`, `/privacy`, every webhook endpoint, and any anonymous visitor being
+ * redirected to log in — shipped with NO Content-Security-Policy, no
+ * `Referrer-Policy`, no `Permissions-Policy`, and no `Cross-Origin-*` headers at all.
+ * Confirmed empirically against production (`curl -D-` against
+ * `relay.coreframe-labs.dev/auth/login` and `/pricing`) before this fix: only the
+ * static `Strict-Transport-Security` / `X-Frame-Options` / `X-Content-Type-Options`
+ * headers from `next.config.js`'s `headers()` were present; nothing from this file.
+ *
+ * The `env.securityHeadersEnabled` gate (`SECURITY_HEADERS_ENABLED` env var) is also
+ * removed here: it is unset in every `.env*` in this repo, undocumented in
+ * `.env.example`, and referenced nowhere else — a leftover kill-switch, defaulting
+ * OFF, that nobody ever turned on. A flag that silently disables the CSP the rest of
+ * this file spends 30 lines building is not a feature; it is the reason the header was
+ * never actually shipped. These headers are now unconditional.
+ */
+function withSecurityHeaders(response: NextResponse, csp?: string): NextResponse {
+  response.headers.set('Content-Security-Policy', csp ?? generateCSP());
+  Object.entries(SECURITY_HEADERS).forEach(([key, value]) => {
+    response.headers.set(key, value);
+  });
+  return response;
+}
+
 export default async function middleware(req: NextRequest) {
   const { pathname } = req.nextUrl;
 
@@ -175,7 +206,7 @@ export default async function middleware(req: NextRequest) {
     micromatch.isMatch(pathname, unAuthenticatedRoutes) ||
     micromatch.isMatch(pathname, localOnlyUnauthenticatedRoutes)
   ) {
-    return NextResponse.next();
+    return withSecurityHeaders(NextResponse.next());
   }
 
   const redirectUrl = new URL('/auth/login', req.url);
@@ -188,7 +219,7 @@ export default async function middleware(req: NextRequest) {
     });
 
     if (!token) {
-      return NextResponse.redirect(redirectUrl);
+      return withSecurityHeaders(NextResponse.redirect(redirectUrl));
     }
   }
 
@@ -206,7 +237,7 @@ export default async function middleware(req: NextRequest) {
     const session = await response.json();
 
     if (!session.user) {
-      return NextResponse.redirect(redirectUrl);
+      return withSecurityHeaders(NextResponse.redirect(redirectUrl));
     }
   }
 
@@ -219,16 +250,8 @@ export default async function middleware(req: NextRequest) {
     request: { headers: requestHeaders },
   });
 
-  if (env.securityHeadersEnabled) {
-    // Set security headers
-    response.headers.set('Content-Security-Policy', csp);
-    Object.entries(SECURITY_HEADERS).forEach(([key, value]) => {
-      response.headers.set(key, value);
-    });
-  }
-
   // All good, let the request through
-  return response;
+  return withSecurityHeaders(response, csp);
 }
 
 export const config = {
