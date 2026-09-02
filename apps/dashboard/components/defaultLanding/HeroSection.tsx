@@ -35,6 +35,7 @@ import Link from 'next/link';
 
 import GapSection from './GapSection';
 import { LandingLink, focusRing } from './LandingPrimitives';
+import WebhookFlowVisual from './WebhookFlowVisual';
 
 const HeroSection = () => (
   <section className="relative overflow-hidden">
@@ -43,6 +44,16 @@ const HeroSection = () => (
       aria-hidden="true"
       className="pointer-events-none absolute inset-x-0 top-0 h-72 bg-[radial-gradient(ellipse_60%_40%_at_50%_-10%,rgba(45,212,191,0.12),transparent_60%)]"
     />
+
+    {/* [director ask, landing-only visual — see WebhookFlowVisual.tsx's header]
+        Sits in the same decorative layer as the glow above, still entirely
+        behind the text/CTAs below in paint order (plain DOM order, same as
+        the glow — no z-index games). Bounded to this h-72 band rather than
+        the whole section so it stays a background accent, not a dominant
+        element. */}
+    <div className="pointer-events-none absolute inset-x-0 top-0 h-72">
+      <WebhookFlowVisual />
+    </div>
 
     <div className="relative mx-auto w-full max-w-6xl px-5 pb-16 pt-14 sm:px-8 sm:pb-24 sm:pt-20">
       <div className="mx-auto max-w-3xl text-center">

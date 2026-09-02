@@ -16,6 +16,7 @@ import { Theme, applyTheme } from '@/lib/theme';
 import { writeAttributionCookie } from '@/lib/relay/attributionCookie';
 import { Themer } from '@boxyhq/react-ui/shared';
 import { AccountLayout } from '@/components/layouts';
+import { PageTransition } from '@/components/shared';
 
 function MyApp({ Component, pageProps }: AppPropsWithLayout) {
   const { session, ...props } = pageProps;
@@ -89,7 +90,19 @@ function MyApp({ Component, pageProps }: AppPropsWithLayout) {
             '--primary-color-950': colors.blue['950'],
           }}
         >
-          {getLayout(<Component {...props} />)}
+          {/* [RELAY-118] `PageTransition` wraps only the routed page content —
+              see its own file header for why it sits INSIDE `getLayout(...)`
+              rather than around it (so `AccountLayout`/`AppShell`'s sidebar and
+              `AuthLayout`'s chrome never re-animate on a route change) and for
+              the redirect-safety and reduced-motion reasoning. `router.pathname`
+              (the route pattern, e.g. `/teams/[slug]/relay/buffer`) is the key,
+              not `asPath` — switching data on the same route (e.g. a team
+              switch) is not a "page transition" and shouldn't replay one. */}
+          {getLayout(
+            <PageTransition routeKey={router.pathname}>
+              <Component {...props} />
+            </PageTransition>
+          )}
         </Themer>
       </SessionProvider>
     </>
