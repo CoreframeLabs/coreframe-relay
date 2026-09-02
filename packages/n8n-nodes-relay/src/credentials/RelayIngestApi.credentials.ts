@@ -17,6 +17,15 @@ import type {
  * test`, documented in docs/integrations/n8n.md and honoured by ingest.ts): it proves
  * the URL is a live, active Relay route without writing a row into the customer's real
  * delivery counts.
+ *
+ * The `rules` array below is what turns that into a MEANINGFUL test rather than "got a
+ * 2xx from something". n8n's declarative credential test only checks the HTTP status by
+ * default, which would also pass for a URL that happens to answer 200 with an unrelated
+ * body — the same "pasted the dashboard URL instead of the ingest URL" mistake
+ * `isLikelyIngestUrl` guards against node-side. `ingest.ts` has one documented success
+ * shape, `{ status: 'queued', requestId }` (see the 200 response at the end of that
+ * handler) — asserting on it here means a credential that "passes" really did reach a
+ * live Relay route, not merely some HTTPS endpoint.
  */
 export class RelayIngestApi implements ICredentialType {
 	name = 'relayIngestApi';
@@ -64,5 +73,18 @@ export class RelayIngestApi implements ICredentialType {
 				event: 'credential-test',
 			},
 		},
+		rules: [
+			{
+				type: 'responseSuccessBody',
+				properties: {
+					key: 'status',
+					value: 'queued',
+					message:
+						"Got an HTTP success response, but not Relay's — this URL answered 200 without the " +
+						'expected {"status":"queued"} body. Double check this is the ingest URL from the last ' +
+						'step of Relay\'s New Route wizard, not the dashboard page for the route.',
+				},
+			},
+		],
 	};
 }

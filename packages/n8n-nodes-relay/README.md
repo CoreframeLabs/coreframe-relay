@@ -26,8 +26,9 @@ is a new Relay API, it's a thin, typed wrapper n8n users don't have to configure
   token-authenticated API for that today — create the route in Relay's own dashboard
   first, then paste its ingest URL into this node's credential.
 - **It does not show live delivery status (DELIVERED / RETRYING / DLQ) in the n8n
-  canvas.** No public read endpoint for that exists yet. Check Relay's own Delivery Log
-  and DLQ pages for that.
+  canvas**, and can't offer a "wait for delivery confirmation" mode either — see
+  "Why there's no delivery-status polling" below for exactly what's blocking that and
+  why it's a backend gap, not something missing from this package's code.
 
 If either of those becomes possible later (a route-management or delivery-status API
 ships on Relay's side), this package is the natural place to add it — nothing here needs
@@ -69,14 +70,49 @@ Relay always strips). A **Mark as Test Request** toggle tags the send the same w
 credential test does.
 
 Errors from Relay (rate limiting, an SSRF-rejected destination, a rotated/invalid ingest
-token, an oversized payload) are mapped to a specific, actionable message rather than a
-raw HTTP status — see the node's `describeRelayError` if you're extending it.
+token, an oversized payload) are mapped to a specific, actionable message and thrown as a
+`NodeApiError` — n8n's class for a failed call to an external API, which is what shows the
+message as the item's headline error in the canvas with the full explanation available in
+"Show error details" and the HTTP status filterable in n8n's error UI. A malformed
+credential (not an ingest-URL shape at all) is instead a `NodeOperationError`, thrown once
+up front — that failure is a misconfigured node, not a rejected API call, which is the
+line n8n's own error-handling reference draws between the two classes. See the node's
+`describeRelayError` / `relayErrorTitle` if you're extending the mapping.
+
+The credential's own **Test** button does the same thing one level up: it doesn't just
+check for an HTTP success status, it asserts the response body actually has Relay
+ingest's documented success shape (`{"status":"queued"}`), so a URL that happens to answer
+200 without being a live Relay route still fails the test with an actionable message.
+
+## Why there's no delivery-status polling
+
+The one gap worth being precise about: this node cannot offer a "wait for delivery
+confirmation" mode that polls Relay's delivery log (`GET
+/api/teams/:slug/relay/log`) for a request's DELIVERED/RETRYING/DLQ status before
+finishing. That endpoint exists and does exactly what you'd want — but it authenticates
+with a NextAuth session cookie (`throwIfNoTeamAccess` → `getSession`), which an n8n
+credential has no way to hold or refresh. Relay does have a separate team-API-key
+mechanism (`apps/dashboard/models/apiKey.ts`), but as of this writing nothing in the
+dashboard actually authenticates a request with it — `getApiKey()`'s only caller is the
+key's own delete-guard, not any data-reading endpoint — so it isn't a usable path today
+either. This is a Relay backend gap, not an n8n limitation: the ingest endpoint this node
+already calls is happy to authenticate a non-browser caller on a per-route token; the
+delivery-log endpoint is not. Closing it is a backend decision (whether to extend the
+existing ingest-token trust boundary to a read, or wire up the unused API-key mechanism)
+big enough to want its own review rather than being decided inside this package.
 
 ## Status
 
-Built and unit-tested (`pnpm test`) against `n8n-workflow`'s published types; **not yet
-run against a live n8n instance**. If you hit something that doesn't match this README,
-please open an issue on
+Built and unit-tested (`pnpm test`, 23 tests) against `n8n-workflow`'s published types,
+**and verified against a real, running n8n 2.37.7 instance in Docker** — loaded as a
+custom extension, executed in a real workflow (Manual Trigger → Relay) against Coreframe
+Relay's live production ingest endpoint, confirmed end-to-end via the resulting
+`DeliveryLog` row, and exercised on both the success path and the `NodeApiError` failure
+path (a real 404 from an invalid route). That live run is also what caught and fixed a
+real bug: n8n's `httpRequest` helper's underlying client is axios, whose errors carry the
+HTTP status at `error.response.status`, not `.statusCode` — the shape this node's error
+mapping originally checked for and a case no mocked-context unit test would have exposed.
+If you hit something that doesn't match this README, please open an issue on
 [coreframe-relay](https://github.com/CoreframeLabs/coreframe-relay/issues) — this is a
 new package.
 
