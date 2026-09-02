@@ -159,6 +159,74 @@ a {
   }
 }
 
+/* [design-overhaul 2026-08] Section reveal + Gap replay — the CSS half of
+ * `components/defaultLanding/Reveal.tsx`'s `RevealObserverMount`. Previously
+ * `relay-reveal`/`relay-gap-*` were applied throughout `components/defaultLanding/**`
+ * with NO matching rule anywhere, so the whole page rendered static regardless of scroll
+ * position. `relay-reveal-init` is added by JS only after an IntersectionObserver is
+ * confirmed available and `prefers-reduced-motion: reduce` is confirmed false — so the
+ * opacity-0 pre-reveal state below can never be the only thing a client without JS (or
+ * with reduced motion) ever sees; the base, class-less state is fully visible. */
+@media (prefers-reduced-motion: no-preference) {
+  .relay-reveal-init {
+    opacity: 0;
+    transform: translateY(8px);
+  }
+
+  .relay-reveal-init.relay-is-revealed {
+    animation: relay-reveal-in 300ms ease-out forwards;
+  }
+
+  /* The Gap's "replay" — GapSection.tsx's own header calls this the strongest asset on
+   * the page; it now actually plays instead of rendering as a finished still. The left
+   * pane's silence and the right pane's response + retry ladder stay hidden until the
+   * section reveals, then step in on a short staggered delay so the retry ladder reads
+   * as a sequence (1→503, 2→503, 3→200) rather than four lines appearing at once. */
+  .relay-reveal-init .relay-gap-silence,
+  .relay-reveal-init .relay-gap-right pre:nth-of-type(2),
+  .relay-reveal-init .relay-gap-right ol > li {
+    opacity: 0;
+  }
+
+  .relay-reveal-init.relay-is-revealed .relay-gap-silence {
+    animation: relay-gap-in 300ms ease-out 500ms forwards;
+  }
+
+  .relay-reveal-init.relay-is-revealed .relay-gap-right pre:nth-of-type(2) {
+    animation: relay-gap-in 250ms ease-out 250ms forwards;
+  }
+
+  .relay-reveal-init.relay-is-revealed .relay-gap-right ol > li:nth-child(1) {
+    animation: relay-gap-in 220ms ease-out 550ms forwards;
+  }
+
+  .relay-reveal-init.relay-is-revealed .relay-gap-right ol > li:nth-child(2) {
+    animation: relay-gap-in 220ms ease-out 800ms forwards;
+  }
+
+  .relay-reveal-init.relay-is-revealed .relay-gap-right ol > li:nth-child(3) {
+    animation: relay-gap-in 220ms ease-out 1050ms forwards;
+  }
+}
+
+@keyframes relay-reveal-in {
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@keyframes relay-gap-in {
+  from {
+    opacity: 0;
+    transform: translateY(4px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
 /* ─────────────────────────────────────────────────────────────────────────────
  * shadcn/ui — zinc base, CSS variables. Added in [RELAY-1].
  *

@@ -33,6 +33,7 @@ import LandingFooter from '@/components/defaultLanding/LandingFooter';
 import LandingNav from '@/components/defaultLanding/LandingNav';
 import N8nSection from '@/components/defaultLanding/N8nSection';
 import ProofSection from '@/components/defaultLanding/ProofSection';
+import { RevealObserverMount } from '@/components/defaultLanding/Reveal';
 import SecuritySection from '@/components/defaultLanding/SecuritySection';
 import WhatItDoesSection from '@/components/defaultLanding/WhatItDoesSection';
 import env from '@/lib/env';
@@ -61,6 +62,9 @@ const LandingPage: NextPageWithLayout = () => {
           `text-landing-primary` per-component. The route follows the same `.dark`
           class the rest of the app toggles (`lib/theme.ts`), light by default. */}
       <div className="min-h-screen bg-landing-base text-landing-secondary antialiased">
+        {/* [design-overhaul 2026-08] Mounted once for the whole page — see
+            Reveal.tsx's file header for why this replaces a per-section wrapper. */}
+        <RevealObserverMount />
         <LandingNav />
         <main>
           {/* Contract §3 section order: Hero (incl. Gap) → Proof → Product → Security → Founding Access/CTA → Footer. RELAY-55: every section sells the phase that exists — Buffer — and nothing else.

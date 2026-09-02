@@ -18,11 +18,17 @@ const FILTERS: Array<{ value: RouteStatus | 'ALL'; label: string }> = [
 /**
  * Buffer → Routes. [RELAY-6].
  *
- * Wrapped in `.dark` and the shadcn surface tokens: relay-ui-ux-spec.md §1.1 is
- * dark-mode-primary, while the surrounding BoxyHQ chrome is daisyUI. Scoping the theme to
- * this subtree is what [RELAY-1] deliberately left room for by NOT emitting shadcn's
- * global `body { @apply bg-background }` reset — so Relay pages can be dark without
- * restyling every inherited BoxyHQ page.
+ * [design-overhaul 2026-08] Used to hardcode a `.dark` class on this wrapper —
+ * relay-ui-ux-spec.md §1.1 was dark-mode-primary at the time, before the ui-revamp
+ * (RELAY-104-108) flipped the rest of the app to a real light-default/dark-toggle. That
+ * left this page (and DlqQueue/DeliveryLogFeed) as the one surface in the product that
+ * ignored the theme switch entirely — a visitor with light mode selected everywhere else
+ * landed here and got dark regardless. The `dark` token is removed; `bg-background` /
+ * `text-foreground` already resolve against the real `:root`/`.dark` CSS variables in
+ * globals.css (set by `lib/theme.ts`'s `applyTheme` on `<html>`), and every child here
+ * (`RoutesTable`, `NewRouteWizard`, shadcn `Button`) already uses semantic tokens with
+ * `dark:` pairings rather than raw zinc/gray hex — confirmed by grep before this change,
+ * not assumed — so removing the forced class is a theme fix, not a re-skin.
  */
 export function BufferRoutes() {
   const router = useRouter();
@@ -39,7 +45,7 @@ export function BufferRoutes() {
   const activeCount = routes.filter((r) => r.status === 'ACTIVE').length;
 
   return (
-    <div className="dark min-h-full bg-background p-6 text-foreground">
+    <div className="min-h-full bg-background p-6 text-foreground">
       <div className="mb-6 flex flex-wrap items-start justify-between gap-4">
         <div>
           <h1 className="text-2xl font-semibold tracking-tight">Routes</h1>

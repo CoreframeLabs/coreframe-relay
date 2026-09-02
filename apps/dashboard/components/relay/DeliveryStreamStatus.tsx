@@ -19,6 +19,14 @@ import type { StreamMode, StreamState } from './DeliveryStream';
  * feed (see the API route's header comment for the measurements). Showing "Live" alone
  * would imply push semantics the stream does not have, and someone would eventually debug
  * a two-second lag as a bug.
+ *
+ * [design-overhaul 2026-08] `text` used to be a flat `-400` shade (`text-zinc-400`,
+ * `text-blue-400`, …) — legible on the dark ambient `DeliveryLogFeed` used to force via a
+ * hardcoded `.dark` wrapper, but that wrapper is gone (see `DeliveryLogFeed.tsx`'s header)
+ * and a `-400` shade on a white light-mode surface drops well below AA (`text-zinc-400`
+ * #a1a1aa on white measures ~2.4:1). Retuned to the same light-tint/saturated-text pattern
+ * `StatusBadge.tsx` already uses and already measured: `-700` text clears 4.5:1 on white,
+ * `dark:` keeps the original `-400` values unchanged.
  */
 
 const STATE_COPY: Record<
@@ -29,37 +37,37 @@ const STATE_COPY: Record<
     label: 'Idle',
     dot: 'bg-zinc-500',
     pulse: false,
-    text: 'text-zinc-400',
+    text: 'text-zinc-600 dark:text-zinc-400',
   },
   connecting: {
     label: 'Connecting',
     dot: 'bg-blue-500',
     pulse: true,
-    text: 'text-blue-400',
+    text: 'text-blue-700 dark:text-blue-400',
   },
   live: {
     label: 'Live',
-    dot: 'bg-green-500',
+    dot: 'bg-green-600 dark:bg-green-500',
     pulse: true,
-    text: 'text-green-400',
+    text: 'text-green-700 dark:text-green-400',
   },
   reconnecting: {
     label: 'Reconnecting',
-    dot: 'bg-amber-500',
+    dot: 'bg-amber-600 dark:bg-amber-500',
     pulse: true,
-    text: 'text-amber-400',
+    text: 'text-amber-700 dark:text-amber-400',
   },
   paused: {
     label: 'Paused',
     dot: 'bg-zinc-500',
     pulse: false,
-    text: 'text-zinc-400',
+    text: 'text-zinc-600 dark:text-zinc-400',
   },
   error: {
     label: 'Disconnected',
     dot: 'bg-red-500',
     pulse: false,
-    text: 'text-red-400',
+    text: 'text-red-700 dark:text-red-400',
   },
 };
 

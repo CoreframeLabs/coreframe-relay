@@ -163,26 +163,47 @@ const DocsPage = ({
                 aria-label="Sections on this page"
                 className="lg:w-64 lg:shrink-0"
               >
-                <ul className="flex flex-col gap-2 border-l border-landing-border pl-4 text-sm lg:sticky lg:top-24">
-                  {sections.map((s) => (
-                    <li key={s.id}>
-                      <a
-                        href={`#${s.id}`}
-                        className="text-landing-secondary transition-colors hover:text-landing-accent-text"
-                      >
-                        {s.title}
-                      </a>
-                    </li>
-                  ))}
-                </ul>
+                <div className="lg:sticky lg:top-24">
+                  {/* [design-overhaul 2026-08] The sidebar previously had no heading at
+                      all — a bare list of links reads as an unlabelled block rather than
+                      "here's where you are on this page", the pattern Stripe/Vercel/
+                      Resend docs all use for their in-page nav. */}
+                  <p className="mb-3 font-mono text-[11px] uppercase tracking-wider text-landing-muted">
+                    On this page
+                  </p>
+                  <ul className="flex flex-col gap-2 border-l border-landing-border pl-4 text-sm">
+                    {sections.map((s) => (
+                      <li key={s.id}>
+                        <a
+                          href={`#${s.id}`}
+                          className={`block rounded text-landing-secondary transition-colors hover:text-landing-accent-text ${focusRing}`}
+                        >
+                          {s.title}
+                        </a>
+                      </li>
+                    ))}
+                  </ul>
+                </div>
               </nav>
             ) : null}
 
             <div className="flex max-w-3xl flex-col gap-12">
               {sections.map((s) => (
                 <section key={s.id} id={s.id} className="scroll-mt-24">
-                  <h2 className="text-xl font-semibold text-landing-primary">
+                  {/* [design-overhaul 2026-08] `group` + an opacity-0→100 anchor link on
+                      hover is the small, standard docs affordance (Stripe/Resend both do
+                      this): hovering a heading reveals a way to link straight to it,
+                      rather than making a reader hunt for the sidebar entry. Always
+                      present for keyboard/AT users via focus-visible, not hover-only. */}
+                  <h2 className="group/heading flex items-center gap-2 text-xl font-semibold text-landing-primary">
                     {s.title}
+                    <a
+                      href={`#${s.id}`}
+                      aria-label={`Link to ${s.title}`}
+                      className={`rounded font-mono text-base font-normal text-landing-muted opacity-0 transition-opacity duration-150 group-hover/heading:opacity-100 focus-visible:opacity-100 ${focusRing}`}
+                    >
+                      #
+                    </a>
                   </h2>
                   <div className="mt-3 text-sm leading-relaxed text-landing-secondary">
                     {s.body}

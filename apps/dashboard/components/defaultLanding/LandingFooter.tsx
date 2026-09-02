@@ -1,8 +1,16 @@
 /**
  * [RELAY-64 v2] Footer — the reproducibility line and the anchors.
  *
- * Contract §3 (Footer): "not a dashboard. a receipt." No newsletter box
- * [contract §3, SYNTHESIS CALL].
+ * [design-overhaul 2026-08] The standalone mono tagline this footer used to open with —
+ * "not a dashboard. a receipt." rendered cold, with no antecedent — is cut per direct
+ * feedback: it read as a non-sequitur slogan dropped at the bottom of the page with
+ * nothing above it setting up the dashboard/receipt contrast. The concept itself is real
+ * and already earned elsewhere on the page (ProofSection's "Proof of receipt" /
+ * "the receipt Stripe's timeout never gives you"), so rather than deleting it outright it
+ * is folded into a full sentence here that states what it actually means — you get a
+ * record of what happened, not a surface to babysit — instead of asserting it as an
+ * unexplained label. Contract §3 (Footer) still governs everything else here: no
+ * newsletter box [contract §3, SYNTHESIS CALL].
  *
  * [Launch-shape change] `#limits` and `#roadmap` are gone — LimitsSection and
  * RoadmapSection are both cut (see `pages/index.tsx`). This is also the ONE place
@@ -34,14 +42,14 @@ const LandingFooter = () => (
     <div className="mx-auto w-full max-w-6xl px-5 py-12 sm:px-8">
       <div className="flex flex-col gap-6 md:flex-row md:items-end md:justify-between">
         <div className="max-w-md">
-          <p className="font-mono text-sm font-semibold text-landing-primary">
-            not a dashboard. a receipt.
+          <p className="text-sm font-semibold leading-relaxed text-landing-primary">
+            Coreframe Relay — Buffer phase, built and running. Every webhook gets
+            a receipt, not a dashboard to babysit: no customers yet, so no logos,
+            no testimonials and no invented numbers on this page either.
           </p>
           <p className="mt-2 text-sm leading-relaxed text-landing-secondary">
-            Coreframe Relay — Buffer phase, built and running. No customers yet,
-            so no logos, no testimonials and no invented numbers on this page. The
-            three-things-to-get-right checklist above is reproducible on your own
-            stack; the dev.to write-up follows when RELAY-70 publishes it.
+            The three-things-to-get-right checklist above is reproducible on your
+            own stack; the dev.to write-up follows when RELAY-70 publishes it.
           </p>
           <nav aria-label="Footer" className="mt-4 flex flex-wrap gap-x-5 gap-y-2">
             <a

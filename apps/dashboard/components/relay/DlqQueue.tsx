@@ -10,10 +10,15 @@ import { retryBlockedReason } from './DlqRetryButton';
 /**
  * Buffer → Dead Letter Queue. [RELAY-8]
  *
- * Same shell as [RELAY-6]'s `BufferRoutes`: scoped `.dark` subtree over shadcn surface
- * tokens, SWR against a team-scoped API route, and no access control in the component —
- * that lives in the API route (`throwIfNoTeamAccess`), which is the boundary that
- * actually matters. A page-level check protects a render; the API check protects data.
+ * Same shell as [RELAY-6]'s `BufferRoutes`: shadcn surface tokens, SWR against a
+ * team-scoped API route, and no access control in the component — that lives in the API
+ * route (`throwIfNoTeamAccess`), which is the boundary that actually matters. A
+ * page-level check protects a render; the API check protects data.
+ *
+ * [design-overhaul 2026-08] The forced `.dark` class this wrapper used to carry is
+ * removed — see `BufferRoutes.tsx`'s header for the full rationale. Same fix, same
+ * reasoning: this page ignored the app's real theme toggle, and its children (`DlqTable`,
+ * `DlqRetryButton`) already use theme-aware shadcn tokens.
  */
 
 type DlqResponse = { data: { items: DlqRow[]; limit: number } };
@@ -51,7 +56,7 @@ export function DlqQueue() {
   }, [rows]);
 
   return (
-    <div className="dark min-h-full bg-background p-6 text-foreground">
+    <div className="min-h-full bg-background p-6 text-foreground">
       <div className="mb-6">
         {slug && (
           <Link

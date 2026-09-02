@@ -21,6 +21,7 @@ import { serverSideTranslations } from 'next-i18next/serverSideTranslations';
 import Link from 'next/link';
 
 import DocsPage, { docsGetLayout } from '@/components/docs/DocsPage';
+import { CodeWindow } from '@/components/docs/CodeWindow';
 import { LandingLink, focusRing } from '@/components/defaultLanding/LandingPrimitives';
 import type { DocsSection } from '@/components/docs/DocsPage';
 import type { NextPageWithLayout } from 'types';
@@ -344,11 +345,14 @@ const sections: DocsSection[] = [
             forwards to it, it doesn&rsquo;t replace it.
           </li>
         </ol>
-        <p className="mt-4">
-          From this point on, the flow is: sender → Relay ingest URL → Relay
-          queues and retries → n8n&rsquo;s Production Webhook URL → your
-          workflow.
-        </p>
+        <p className="mt-4">From this point on, the flow is:</p>
+        <CodeWindow label="request path">
+          {`sender
+  → Relay ingest URL
+  → Relay queues the request, retries with backoff on failure
+  → n8n's Production Webhook URL
+  → your workflow`}
+        </CodeWindow>
       </>
     ),
   },
