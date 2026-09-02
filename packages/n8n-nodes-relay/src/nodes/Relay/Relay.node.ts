@@ -5,8 +5,9 @@ import type {
 	INodeExecutionData,
 	INodeType,
 	INodeTypeDescription,
+	JsonObject,
 } from 'n8n-workflow';
-import { NodeConnectionTypes, NodeOperationError } from 'n8n-workflow';
+import { NodeApiError, NodeConnectionTypes, NodeOperationError } from 'n8n-workflow';
 
 /**
  * What this node is, precisely — read before extending it.
@@ -31,8 +32,13 @@ import { NodeConnectionTypes, NodeOperationError } from 'n8n-workflow';
  *     routes are all gated by a NextAuth session cookie via `getCurrentUserWithTeam`, not
  *     by a bearer token an external node could hold) — building against it would mean
  *     inventing an API that isn't there. Create the route in Relay's own dashboard first.
- *   - It does not read or display live DELIVERED/RETRYING/DLQ status. Same reason: no
- *     public read endpoint exists for that yet either. See README.md, "What's not built".
+ *   - It does not read or display live DELIVERED/RETRYING/DLQ status, and cannot offer a
+ *     "wait for delivery confirmation" mode. `GET /api/teams/:slug/relay/log` DOES exist
+ *     and returns exactly this, but it authenticates with a NextAuth session cookie
+ *     (`throwIfNoTeamAccess` → `getSession`), which an n8n credential has no way to hold.
+ *     The team-API-key mechanism in `models/apiKey.ts` looks like an alternative but isn't
+ *     one yet: `getApiKey()`'s only caller today is the key's own delete-guard, not any
+ *     data-reading endpoint. See README.md, "Why there's no delivery-status polling".
  */
 export class Relay implements INodeType {
 	description: INodeTypeDescription = {
@@ -176,15 +182,31 @@ export class Relay implements INodeType {
 					pairedItem: itemIndex,
 				});
 			} catch (error) {
-				const message = describeRelayError(error);
+				const description = describeRelayError(error);
 				if (this.continueOnFail()) {
 					returnData.push({
-						json: { ok: false, error: message },
+						json: { ok: false, error: description },
 						pairedItem: itemIndex,
 					});
 					continue;
 				}
-				throw new NodeOperationError(this.getNode(), message, { itemIndex });
+
+				// [n8n error-handling reference, docs.n8n.io/.../reference/error-handling] this is
+				// a failure ATTRIBUTABLE TO CALLING RELAY'S API — a non-2xx response, a timeout, a
+				// DNS failure — so it is a NodeApiError, not a NodeOperationError. NodeApiError is
+				// the class n8n's own nodes use for exactly this case; it renders with the request
+				// context, the underlying `errorResponse` in the item's "Show error details" panel,
+				// and (when `httpCode` is set) filters by status code in n8n's error-history UI.
+				// The credential-shape check above this loop stays a NodeOperationError deliberately
+				// — that failure is a misconfigured node, not a rejected API call, which is the
+				// documented dividing line between the two classes.
+				const statusCode = extractStatusCode(error);
+				throw new NodeApiError(this.getNode(), error as JsonObject, {
+					message: relayErrorTitle(statusCode),
+					description,
+					httpCode: statusCode !== undefined ? String(statusCode) : undefined,
+					itemIndex,
+				});
 			}
 		}
 
@@ -202,25 +224,83 @@ export function isLikelyIngestUrl(url: string): boolean {
 }
 
 /**
- * Maps the specific status codes `apps/proxy/src/routes/ingest.ts` is documented to
- * return into the same explanation `docs/integrations/n8n.md` already gives a human
- * reading the delivery log — so a workflow builder sees the same story whether they're
- * looking at the dashboard or at this node's error.
- *
  * Defensive about the error's shape on purpose: `this.helpers.httpRequest` wraps a
  * non-2xx response in an error object, but the exact property names it exposes have
  * shifted across n8n-workflow versions, so this checks a few plausible locations rather
- * than asserting one. Untested against a live n8n runtime — see README.md.
+ * than asserting one. Shared by `describeRelayError` (the human-readable description)
+ * and the node's catch block (the `httpCode` it hands to `NodeApiError`), so the two
+ * never disagree about which status code a given error actually carries.
  */
-export function describeRelayError(error: unknown): string {
+export function extractStatusCode(error: unknown): number | undefined {
 	const err = error as {
 		statusCode?: number;
 		httpCode?: string | number;
-		response?: { statusCode?: number; headers?: Record<string, string> };
+		response?: { statusCode?: number; status?: number };
+		cause?: { response?: { statusCode?: number; status?: number } };
+	};
+	if (err.statusCode !== undefined) return err.statusCode;
+	if (err.response?.statusCode !== undefined) return err.response.statusCode;
+	// [Verified against a real n8n 2.37.7 instance, not just the unit tests' mocked
+	// shape] `this.helpers.httpRequest`'s underlying client is axios, and an axios
+	// error carries the HTTP status at `error.response.status` — NOT `.statusCode`.
+	// Without this branch, a real httpRequest failure fell through to `undefined`
+	// here even though `NodeApiError`'s OWN internal fallback (a wider property
+	// search) still found 404 on `errorResponse`, so the thrown error's `httpCode`
+	// looked right by accident while `relayErrorTitle`/`describeRelayError` — which
+	// only see what THIS function returns — silently produced the generic "Request
+	// to Relay failed" title instead of the specific, actionable one. This is the
+	// exact "property names shift" risk the original comment on this function
+	// warned about, caught by running the built node in Docker rather than only
+	// against mocked `IExecuteFunctions`.
+	if (err.response?.status !== undefined) return err.response.status;
+	if (err.cause?.response?.statusCode !== undefined) return err.cause.response.statusCode;
+	if (err.cause?.response?.status !== undefined) return err.cause.response.status;
+	if (err.httpCode !== undefined) {
+		const parsed = Number(err.httpCode);
+		return Number.isNaN(parsed) ? undefined : parsed;
+	}
+	return undefined;
+}
+
+/**
+ * A short, stable title per status code — this is the `message` handed to
+ * `NodeApiError`, which n8n shows as the item's headline error in the canvas. Kept
+ * separate from `describeRelayError`'s full sentence, which becomes the error's
+ * `description` (the expandable detail), so the canvas shows a scannable title first
+ * and the full explanation on demand rather than one long run-on headline.
+ */
+export function relayErrorTitle(statusCode: number | undefined): string {
+	switch (statusCode) {
+		case 404:
+			return 'Relay route not found or ingest token invalid';
+		case 413:
+			return 'Relay rejected the payload: too large';
+		case 429:
+			return 'Relay is rate-limiting this team';
+		case 502:
+			return "Relay rejected the route's destination";
+		case 503:
+			return 'Relay is temporarily unavailable';
+		default:
+			return 'Request to Relay failed';
+	}
+}
+
+/**
+ * Maps the specific status codes `apps/proxy/src/routes/ingest.ts` is documented to
+ * return into the same explanation `docs/integrations/n8n.md` already gives a human
+ * reading the delivery log — so a workflow builder sees the same story whether they're
+ * looking at the dashboard or at this node's error. Becomes the `description` on the
+ * `NodeApiError` thrown in `execute()` — see `extractStatusCode` above for why the
+ * status-code parsing itself lives in one place.
+ */
+export function describeRelayError(error: unknown): string {
+	const err = error as {
+		response?: { headers?: Record<string, string> };
 		message?: string;
 	};
 
-	const statusCode = err.statusCode ?? err.response?.statusCode ?? Number(err.httpCode) ?? undefined;
+	const statusCode = extractStatusCode(error);
 
 	switch (statusCode) {
 		case 404:
