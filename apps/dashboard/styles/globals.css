@@ -178,34 +178,70 @@ a {
   }
 
   /* The Gap's "replay" — GapSection.tsx's own header calls this the strongest asset on
-   * the page; it now actually plays instead of rendering as a finished still. The left
-   * pane's silence and the right pane's response + retry ladder stay hidden until the
-   * section reveals, then step in on a short staggered delay so the retry ladder reads
-   * as a sequence (1→503, 2→503, 3→200) rather than four lines appearing at once. */
+   * the page. Sequenced (per director ask, see GapSection.tsx's header for the full
+   * timeline): both request lines "type" in first, then the left pane falls silent,
+   * then the connector pill marks Relay stepping in, then the right pane's response
+   * and retry ladder step in one line at a time with a growing gap between retries
+   * (450ms, then 550ms) so it reads as backoff — not four lines rendering at once —
+   * and finally the nested `RelayFlowDiagram` terminal appears as the conclusion.
+   * Every element below follows the same armed/revealed contract as `.relay-reveal-init`
+   * itself: hidden only once JS has confirmed reduced-motion is off (see this block's
+   * own file-level comment above), so a reduced-motion or no-JS client never sees any
+   * of these opacity/clip-path states — only the final, fully-rendered DOM. */
+  .relay-reveal-init .relay-gap-request {
+    clip-path: inset(0 100% 0 0);
+  }
+
   .relay-reveal-init .relay-gap-silence,
-  .relay-reveal-init .relay-gap-right pre:nth-of-type(2),
-  .relay-reveal-init .relay-gap-right ol > li {
+  .relay-reveal-init .relay-gap-connector-inner,
+  .relay-reveal-init .relay-gap-response,
+  .relay-reveal-init .relay-gap-retry-1,
+  .relay-reveal-init .relay-gap-retry-2,
+  .relay-reveal-init .relay-gap-retry-3,
+  .relay-reveal-init .relay-gap-diagram {
     opacity: 0;
   }
 
+  /* 1. Both request lines type in together — one request, two outcomes; the
+   *    divergence only starts once the request has actually "landed". */
+  .relay-reveal-init.relay-is-revealed .relay-gap-request {
+    animation: relay-gap-type 650ms steps(22, end) 150ms forwards;
+  }
+
+  /* 2. Left pane falls silent. */
   .relay-reveal-init.relay-is-revealed .relay-gap-silence {
-    animation: relay-gap-in 300ms ease-out 500ms forwards;
+    animation: relay-gap-in 300ms ease-out 900ms forwards;
   }
 
-  .relay-reveal-init.relay-is-revealed .relay-gap-right pre:nth-of-type(2) {
-    animation: relay-gap-in 250ms ease-out 250ms forwards;
+  /* 3. The connection moment: Relay enters the picture between the two panes. */
+  .relay-reveal-init.relay-is-revealed .relay-gap-connector-inner {
+    animation: relay-gap-in 250ms ease-out 950ms forwards;
   }
 
-  .relay-reveal-init.relay-is-revealed .relay-gap-right ol > li:nth-child(1) {
-    animation: relay-gap-in 220ms ease-out 550ms forwards;
+  .relay-reveal-init.relay-is-revealed .relay-gap-connector-dot {
+    animation: relay-gap-dot-pulse 550ms ease-in-out 950ms 2;
   }
 
-  .relay-reveal-init.relay-is-revealed .relay-gap-right ol > li:nth-child(2) {
-    animation: relay-gap-in 220ms ease-out 800ms forwards;
+  /* 4. The With pane answers, then the retry ladder climbs one attempt at a time. */
+  .relay-reveal-init.relay-is-revealed .relay-gap-response {
+    animation: relay-gap-in 250ms ease-out 1400ms forwards;
   }
 
-  .relay-reveal-init.relay-is-revealed .relay-gap-right ol > li:nth-child(3) {
-    animation: relay-gap-in 220ms ease-out 1050ms forwards;
+  .relay-reveal-init.relay-is-revealed .relay-gap-retry-1 {
+    animation: relay-gap-in 220ms ease-out 1750ms forwards;
+  }
+
+  .relay-reveal-init.relay-is-revealed .relay-gap-retry-2 {
+    animation: relay-gap-in 220ms ease-out 2200ms forwards;
+  }
+
+  .relay-reveal-init.relay-is-revealed .relay-gap-retry-3 {
+    animation: relay-gap-in 220ms ease-out 2750ms forwards;
+  }
+
+  /* 5. The surviving flow-diagram terminal — the sequence's conclusion. */
+  .relay-reveal-init.relay-is-revealed .relay-gap-diagram {
+    animation: relay-gap-in 300ms ease-out 3150ms forwards;
   }
 }
 
@@ -224,6 +260,32 @@ a {
   to {
     opacity: 1;
     transform: translateY(0);
+  }
+}
+
+/* The request-line "typewriter": reveals the line left-to-right via `clip-path`
+ * rather than animating `width`, so it keeps working with the line's existing
+ * `whitespace-pre-wrap break-all` (a fixed-width/`nowrap` typewriter would fight
+ * that wrapping on narrow viewports). `steps()` gives it a discrete, typed
+ * cadence rather than a smooth wipe. */
+@keyframes relay-gap-type {
+  to {
+    clip-path: inset(0 0 0 0);
+  }
+}
+
+/* The connector's dot: a brief, finite pulse (2 iterations, not `infinite`) —
+ * this is a one-time "Relay steps in" beat, matching the Gap replay's own
+ * "played once" contract, not an ambient always-on animation. */
+@keyframes relay-gap-dot-pulse {
+  0%,
+  100% {
+    transform: scale(1);
+    opacity: 1;
+  }
+  50% {
+    transform: scale(1.6);
+    opacity: 0.6;
   }
 }
 
