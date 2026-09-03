@@ -18,11 +18,16 @@
  * repeat it and no longer do. Anchors now point at Security and Founding Access,
  * the two sections that replaced Limits/Roadmap and Pricing respectively.
  *
- * The dev.to article link the contract asks for is DEFERRED: RELAY-70's article
- * is still an unwritten draft, and a pre-launch footer linking a 404 fails the
+ * The dev.to article link the contract asks for is DEFERRED: the article is
+ * still an unwritten draft, and a pre-launch footer linking a 404 fails the
  * honesty bar harder than the omission. The no-commitment "three things to get
  * right" checklist it would have carried is inlined in the Founding Access
- * section's <details> instead, and the footer notes the article is coming.
+ * section's <details> instead. [2026-09-03] Removed the footer's own forward-
+ * looking "write-up follows" line and its internal ticket reference — a public
+ * page is not the place to name an internal ticket ID or promise unpublished
+ * content a visitor has no way to verify; the footer states only what is
+ * concretely true today (the checklist is reproducible now) and says nothing
+ * about content that doesn't exist yet.
  *
  * [RELAY-79 / RELAY-82] Legal links added. `growth/product/relay-launch-decisions.md`
  * decision #7 named this precisely: "The landing page footer links to #limits,
@@ -49,7 +54,7 @@ const LandingFooter = () => (
           </p>
           <p className="mt-2 text-sm leading-relaxed text-landing-secondary">
             The three-things-to-get-right checklist above is reproducible on your
-            own stack; the dev.to write-up follows when RELAY-70 publishes it.
+            own stack.
           </p>
           <nav aria-label="Footer" className="mt-4 flex flex-wrap gap-x-5 gap-y-2">
             <a

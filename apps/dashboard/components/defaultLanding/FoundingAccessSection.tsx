@@ -178,7 +178,7 @@ const FoundingAccessSection = () => (
             </span>{' '}
             Over-cap bodies are refused with a 413 before they are buffered —
             counted as they stream, never silently truncated. DLQ retry
-            replays the original request headers (RELAY-65), so a vendor
+            replays the original request headers, so a vendor
             signature (Stripe-Signature, X-Hub-Signature-256,
             X-Shopify-Hmac-SHA256) is replayed byte-identically on rows
             written after this shipped. DLQ rows written before it has no
@@ -241,8 +241,7 @@ const FoundingAccessSection = () => (
             </li>
           </ol>
           <p className="mt-4 border-t border-landing-border pt-3 text-xs text-landing-muted">
-            A deeper write-up of all three is being prepared for dev.to under
-            RELAY-70; the link lands here when the article is published.
+            A deeper technical write-up of all three is in progress.
           </p>
         </div>
       </details>
