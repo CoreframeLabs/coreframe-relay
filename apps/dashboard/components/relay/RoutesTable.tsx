@@ -255,10 +255,57 @@ export function RoutesTable({
           </span>
         ),
       }),
-      // [RELAY-50] One action column, one button. The button's own popover carries
-      // "Send to the built-in catcher" as a second step for an onboarding user who
-      // has not wired a destination yet; the column header is the action, not the
-      // route, so it is not sorted or filtered.
+    ],
+    // Rebuilt whenever per-row interaction state changes: cell renderers read
+    // `revealedIds`/`rotatingId`/`copiedId` from closure, and a memo that ignored them
+    // would leave a revealed token visible — or a spinner frozen — after the state moved.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [revealedIds, rotatingId, copiedId, teamSlug, onRotated]
+  );
+
+  /**
+   * [RELAY-112] The "actions" (Send test) column, memoized SEPARATELY from the
+   * columns above — REAL root cause of the "Send test" popover discarding its own
+   * state on an unrelated background refresh, confirmed by direct reproduction
+   * (a real production build, a real signup/route/click, an instrumented
+   * mount/unmount log on `SendTestButton` itself — not guessed from reading the
+   * code, and NOT the `BufferRoutes.tsx` SWR-focus-revalidation theory flagged
+   * earlier, which is already disabled at `AccountLayout.tsx`'s `SWRConfig` and
+   * was checked and ruled out first).
+   *
+   * `@tanstack/react-table`'s `flexRender` calls a `cell` value that is a plain
+   * function the SAME WAY it renders a component: `<Cell {...context} />` — the
+   * function's OWN IDENTITY becomes the React element type. The single `columns`
+   * memo above was ONE array covering every column, rebuilt on every reveal/copy/
+   * rotate interaction AND on every `BufferRoutes` render (its `onRotated={() =>
+   * mutate()}` prop is a fresh inline closure every time, so it was never actually
+   * stable either). Every rebuild produced a BRAND NEW `cell` function for the
+   * actions column too, even though that column reads none of
+   * `revealedIds`/`rotatingId`/`copiedId` and only ever needs `teamSlug` — which
+   * does not change for the life of this page. A new function each render is a
+   * new element TYPE to React, which unmounts and remounts the previous instance
+   * instead of updating its props — discarding `SendTestButton`'s own `open`/
+   * `phase`/`error` `useState` the instant ANYTHING else on the page re-rendered
+   * this table: revealing a DIFFERENT row's token, copying a DIFFERENT row's URL,
+   * or — the exact case this ticket's E2E suite hit — creating another route,
+   * which calls `mutate()` and re-renders every row. Verified directly: an
+   * instrumented `useEffect` mount/unmount log on `SendTestButton` showed it
+   * cycling MOUNTED → UNMOUNTED → MOUNTED... on interactions that never touched
+   * that row at all, and a real "destination rejected" 502 popover (open, with
+   * its error text visible) vanished from the DOM entirely — not merely hidden —
+   * the moment a second route was created elsewhere on the same page.
+   *
+   * The fix: give this column its own memo keyed on the one value it actually
+   * depends on. `teamSlug` is fixed for the page's lifetime, so in practice this
+   * `cell` function is now created ONCE and never replaces itself — the row's
+   * `SendTestButton` mounts once and stays mounted for as long as its route stays
+   * in the table, regardless of what else on the page changes. Combined with
+   * `getRowId` below (real row identity instead of array-index position), the
+   * row a popover is open on now survives both an unrelated cell re-render AND
+   * an unrelated reorder of the routes list.
+   */
+  const actionsColumn = useMemo(
+    () =>
       columnHelper.display({
         id: 'actions',
         header: '',
@@ -282,12 +329,12 @@ export function RoutesTable({
           );
         },
       }),
-    ],
-    // Rebuilt whenever per-row interaction state changes: cell renderers read
-    // `revealedIds`/`rotatingId`/`copiedId` from closure, and a memo that ignored them
-    // would leave a revealed token visible — or a spinner frozen — after the state moved.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-    [revealedIds, rotatingId, copiedId, teamSlug, onRotated]
+    [teamSlug]
+  );
+
+  const allColumns = useMemo(
+    () => [...columns, actionsColumn],
+    [columns, actionsColumn]
   );
 
   const data = useMemo(
@@ -297,13 +344,31 @@ export function RoutesTable({
 
   const table = useReactTable({
     data,
-    columns,
+    columns: allColumns,
     state: { sorting, globalFilter: search },
     onSortingChange: setSorting,
     onGlobalFilterChange: setSearch,
     getCoreRowModel: getCoreRowModel(),
     getSortedRowModel: getSortedRowModel(),
     getFilteredRowModel: getFilteredRowModel(),
+    // [RELAY-112] REAL root cause of the "Send test" popover disappearing on an
+    // unrelated background refresh, confirmed by direct reproduction (a real
+    // production build, no dev-mode Fast Refresh, no SWR focus-revalidation
+    // involved -- that theory was checked and ruled out: `AccountLayout.tsx` sets
+    // `revalidateOnFocus: false` for this whole dashboard shell).
+    //
+    // Without `getRowId`, tanstack-table defaults a row's identity to its INDEX
+    // in `data`. `data` is server-sorted `createdAt` desc, so creating (or
+    // deleting) ANY route shifts every route below it to a different index --
+    // reproduced directly: open route A's "Send test" popover, create route B
+    // (which sorts above A), and route A's row silently remounts, discarding
+    // `SendTestButton`'s local `open`/`phase`/`error` state along with it, even
+    // though route A itself never changed. `TableRow key={row.id}` /
+    // `TableCell key={cell.id}` below both derive from this same id, so this one
+    // line is the actual fix, not a downstream patch: give the row its real,
+    // stable identity (the route's own database id) instead of a position that
+    // moves under it.
+    getRowId: (row) => row.id,
   });
 
   if (routes.length === 0) {
@@ -370,7 +435,7 @@ export function RoutesTable({
         <TableBody>
           {table.getRowModel().rows.length === 0 ? (
             <TableRow>
-              <TableCell colSpan={columns.length} className="h-24 text-center text-muted-foreground">
+              <TableCell colSpan={allColumns.length} className="h-24 text-center text-muted-foreground">
                 {t('no-routes-match-filter')}
               </TableCell>
             </TableRow>

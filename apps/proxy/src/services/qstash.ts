@@ -76,10 +76,12 @@ export async function publishToQStash(
     res = await fetch(publishUrl, {
       method: 'POST',
       headers: {
-        // The Bearer token is only needed for the real QStash path — the local loop
-        // trusts the shared local dev environment and authentication on the receiving
-        // endpoint is the responsibility of that endpoint's own signature check.
-        ...(localQueue ? {} : { authorization: `Bearer ${token}` }),
+        // The real QStash path authenticates with the Upstash token above; the local
+        // loop instead needs `RELAY_API_SECRET`, because `qstash-test.ts` (the endpoint
+        // this branch calls) unconditionally requires `Bearer <RELAY_API_SECRET>` and
+        // 401s without it — the same secret/header shape `routeLookup.ts` already uses
+        // for every other proxy → dashboard internal call. [RELAY-112]
+        authorization: localQueue ? `Bearer ${env.RELAY_API_SECRET ?? ''}` : `Bearer ${token}`,
         'content-type': 'application/json',
         ...(localQueue
           ? {}

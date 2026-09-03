@@ -111,3 +111,120 @@ describe('[security-hardening] middleware stamps security headers on every respo
     }
   });
 });
+
+/**
+ * [RELAY-112] Regression test for the middleware/handler local-only mismatch.
+ *
+ * `localOnlyUnauthenticatedRoutes` used to be `NODE_ENV === 'production' ? [] :
+ * [...]` — no Host check at all, so a local `next build && next start` run
+ * (`NODE_ENV=production`, no deploy-platform marker, loopback Host) could never
+ * reach `/api/relay/qstash-test` / `/api/relay/smoke-destination` through this
+ * file, even though both handlers' OWN `localOnlyVerdict` explicitly allow exactly
+ * that case. Every call 307'd to `/auth/login` instead — found running
+ * `consumer-journey.spec.ts` for real against a local production build, not from
+ * reading the code. `qstash-test.ts`'s own `[RELAY-72]` unit tests
+ * (`relay-50.test.ts`) never caught this because they call the handler directly
+ * and never go through `middleware.ts` at all.
+ *
+ * `jest.replaceProperty` (not a plain `process.env.NODE_ENV = …` assignment) so
+ * this file does not pick up the pre-existing `TS2540` "NODE_ENV is read-only"
+ * baseline error the three OTHER NODE_ENV-mutating test files already carry.
+ */
+describe('[RELAY-112] middleware allows the local-only endpoints on a local production build over loopback, and nowhere else', () => {
+  beforeEach(() => {
+    // Explicit and UNauthenticated by default: every test in this block asserts
+    // what the LOCAL-ONLY-PATH bypass itself decides, and a stale `getToken` mock
+    // leaking in from another describe block's last test (this file's outer block
+    // ends on an AUTHENTICATED mock) would make a broken bypass pass for the
+    // wrong reason — through the normal "has a valid session" path instead of
+    // through the bypass this suite exists to test.
+    getToken.mockReset();
+    getToken.mockResolvedValue(null);
+  });
+
+  afterEach(() => {
+    jest.restoreAllMocks();
+  });
+
+  it('passes /api/relay/qstash-test through on NODE_ENV=production + a loopback Host', async () => {
+    jest.replaceProperty(process.env, 'NODE_ENV', 'production');
+    for (const marker of ['VERCEL', 'VERCEL_ENV', 'VERCEL_URL', 'RENDER'] as const) {
+      delete process.env[marker];
+    }
+
+    const req = new NextRequest(new URL('http://localhost:4002/api/relay/qstash-test'), {
+      headers: { host: 'localhost:4002' },
+    });
+    const res = await middleware(req);
+
+    // NextResponse.next() carries no redirect status/location — a 307 here would
+    // mean the old bug is back.
+    expect(res.status).toBe(200);
+    expect(res.headers.get('location')).toBeNull();
+    // The outer allowlist bypass still stamps the same security headers as every
+    // other unauthenticated path.
+    assertFullySecured(res);
+  });
+
+  it('still 307s /api/relay/qstash-test on NODE_ENV=production + a REMOTE Host (a real deployment)', async () => {
+    jest.replaceProperty(process.env, 'NODE_ENV', 'production');
+    for (const marker of ['VERCEL', 'VERCEL_ENV', 'VERCEL_URL', 'RENDER'] as const) {
+      delete process.env[marker];
+    }
+    getToken.mockResolvedValue(null);
+
+    const req = new NextRequest(
+      new URL('https://relay.coreframe-labs.dev/api/relay/qstash-test'),
+      { headers: { host: 'relay.coreframe-labs.dev' } }
+    );
+    const res = await middleware(req);
+
+    expect(res.status).toBe(307);
+    expect(res.headers.get('location')).toContain('/auth/login');
+  });
+
+  it('still 307s /api/relay/qstash-test when a deploy-platform marker is set, even on a loopback Host', async () => {
+    jest.replaceProperty(process.env, 'NODE_ENV', 'production');
+    process.env.VERCEL = '1';
+    getToken.mockResolvedValue(null);
+
+    const req = new NextRequest(new URL('http://localhost:4002/api/relay/qstash-test'), {
+      headers: { host: 'localhost:4002' },
+    });
+    const res = await middleware(req);
+
+    expect(res.status).toBe(307);
+    expect(res.headers.get('location')).toContain('/auth/login');
+
+    delete process.env.VERCEL;
+  });
+
+  it('passes /api/relay/smoke-destination through on the same terms', async () => {
+    jest.replaceProperty(process.env, 'NODE_ENV', 'production');
+    for (const marker of ['VERCEL', 'VERCEL_ENV', 'VERCEL_URL', 'RENDER'] as const) {
+      delete process.env[marker];
+    }
+
+    const req = new NextRequest(
+      new URL('http://localhost:4002/api/relay/smoke-destination'),
+      { headers: { host: 'localhost:4002' } }
+    );
+    const res = await middleware(req);
+
+    expect(res.status).toBe(200);
+    expect(res.headers.get('location')).toBeNull();
+  });
+
+  it('does NOT affect an unrelated path — /dashboard still redirects an anonymous visitor regardless of NODE_ENV', async () => {
+    jest.replaceProperty(process.env, 'NODE_ENV', 'production');
+    getToken.mockResolvedValue(null);
+
+    const req = new NextRequest(new URL('http://localhost:4002/dashboard'), {
+      headers: { host: 'localhost:4002' },
+    });
+    const res = await middleware(req);
+
+    expect(res.status).toBe(307);
+    expect(res.headers.get('location')).toContain('/auth/login');
+  });
+});

@@ -4,6 +4,7 @@ import { NextResponse } from 'next/server';
 import type { NextRequest } from 'next/server';
 
 import env from './lib/env';
+import { localOnlyVerdict } from './lib/relay/localOnly';
 
 // Constants for security headers
 const SECURITY_HEADERS = {
@@ -138,9 +139,8 @@ const unAuthenticatedRoutes = [
 ];
 
 /**
- * Paths that are unauthenticated ONLY in a non-production build — [RELAY-72], [RELAY-74].
- *
- * Both are local-only test rigs, and both previously sat in the list above unconditionally:
+ * Paths whose OWN handler already implements `localOnlyVerdict` — [RELAY-72],
+ * [RELAY-74], [RELAY-112].
  *
  *  - `/api/relay/qstash-test` [RELAY-50] is the local stand-in for the QStash consumer.
  *    It skips `verifySignature` and takes its destination from a caller-supplied envelope,
@@ -153,19 +153,36 @@ const unAuthenticatedRoutes = [
  *    retry path (RELAY-8) replays the envelope with EMPTY headers, so no Bearer the route
  *    was created with could ever reach a retried delivery.
  *
- * Without an entry here in local dev the middleware would redirect the pipeline's own
- * outbound POST to `/auth/login`, and the smoke leg could never drive a failure or a retry
- * through the real pipeline. `NODE_ENV` is inlined into the Edge bundle at build time, so
- * in a production build these strings are not merely unmatched — the entries do not exist.
+ * [RELAY-112] THIS USED TO BE `NODE_ENV === 'production' ? [] : [...]` — no Host check
+ * at all. That conflates two things `NODE_ENV` alone cannot tell apart: a REAL deployed
+ * dashboard (Vercel/Render/etc — refused below regardless, via `isDeployedPlatform`) and
+ * a developer's own `next build && next start` on a laptop, which is ALSO
+ * `NODE_ENV=production` but has no deploy-platform marker and arrives on a loopback
+ * Host. The latter is exactly the workflow this repo's own `scripts/build.sh` and
+ * `playwright.config.ts` (`webServer.command: 'npm run start'`) standardize local
+ * testing on — and the old check made both endpoints permanently unreachable there:
+ * every call 307'd to `/auth/login`, which answers 200 HTML, which
+ * `qstash.ts`'s local-loop `fetch` then silently mistook for a successful publish (a
+ * redirect's terminal 200 makes `res.ok` true; the HTML body's JSON-parse failure falls
+ * into `publishToQStash`'s own "still ok, just no messageId" catch). No `DeliveryLog`
+ * row was ever written and the "Send test" button showed a false "Queued" with nothing
+ * behind it — found running `consumer-journey.spec.ts` for real against a local
+ * production build, not from reading the code; `qstash-test.ts`'s OWN unit tests never
+ * caught it because they call the handler directly and never go through this file.
+ *
+ * Fixed by reusing the exact same three-arm decision the handlers already implement
+ * (and already have direct coverage for — `relay-50.test.ts`'s `[RELAY-72]` describe
+ * block) instead of keeping a second, less precise copy of it here. This is a
+ * narrowing relative to the two-branch check it replaces, never a widening: a real
+ * deployment is still refused unconditionally by the deploy-platform-marker arm,
+ * exactly as before.
  *
  * This is the OUTER of two independent controls. Each handler also calls
- * `localOnlyVerdict` itself and answers 404, so a session-authenticated user on a deployed
- * dashboard (who would pass the middleware regardless of this list) still cannot reach one.
+ * `localOnlyVerdict` itself and answers 404, so a session-authenticated user on a
+ * deployed dashboard (who would pass the middleware regardless of this list) still
+ * cannot reach one.
  */
-const localOnlyUnauthenticatedRoutes =
-  process.env.NODE_ENV === 'production'
-    ? []
-    : ['/api/relay/qstash-test', '/api/relay/smoke-destination'];
+const LOCAL_ONLY_PATHS = ['/api/relay/qstash-test', '/api/relay/smoke-destination'];
 
 /**
  * Stamp every outgoing response with CSP + the fixed security-header set.
@@ -204,7 +221,8 @@ export default async function middleware(req: NextRequest) {
   // Bypass routes that don't require authentication
   if (
     micromatch.isMatch(pathname, unAuthenticatedRoutes) ||
-    micromatch.isMatch(pathname, localOnlyUnauthenticatedRoutes)
+    (micromatch.isMatch(pathname, LOCAL_ONLY_PATHS) &&
+      localOnlyVerdict(req.headers.get('host') ?? undefined).ok)
   ) {
     return withSecurityHeaders(NextResponse.next());
   }
