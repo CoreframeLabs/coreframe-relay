@@ -131,41 +131,53 @@ test.describe.serial('consumer journey — signup, login, route, webhook, DLQ, s
       await expect(deliveryLog.rowFor(requestId as string)).toBeVisible({ timeout: 20_000 });
       await expect(deliveryLog.rowFor(requestId as string)).toContainText('TEST');
     } else {
-      // ─── A REAL, REPRODUCED LOCAL-DEV-ONLY BUG, NOT A FLAKY TEST ──────────────────
+      // ─── [RELAY-112] REGRESSION GUARD, NOT THE EXPECTED PATH ──────────────────────
       //
-      // Confirmed by direct reproduction outside Playwright (curl) while building this
-      // suite, independent of any Playwright timing: apps/proxy/src/services/qstash.ts's
-      // `RELAY_LOCAL_QUEUE_URL` local-loop branch (~line 82) sends NO Authorization
-      // header when it POSTs the envelope to the dashboard's local consumer stand-in —
-      // but apps/dashboard/pages/api/relay/qstash-test.ts:69-72 unconditionally requires
-      // a valid `Bearer <RELAY_API_SECRET>` and 401s without one. Confirmed with the
-      // SAME secret this suite's .env carries: a request with the correct Bearer header
-      // gets 400 (bad body) — proving the secret matches — while a request with no
-      // header at all (exactly what the proxy's local loop sends) gets 401. So every
-      // real send through the actual ingest pipeline 401s at the local queue hand-off,
-      // and the proxy reports 503 "not_configured"-shaped upstream, which
-      // `test-send.ts` surfaces as this button's 502 "Test webhook could not be
-      // enqueued". `scripts/smoke-buffer.sh`'s own steps 5/6/8 never hit this: they
-      // call `/api/relay/qstash-test` DIRECTLY with the correct Bearer header, bypassing
-      // the proxy's local-loop call entirely — so nothing before this suite exercised
-      // the real proxy → local-queue → consumer hand-off a genuine browser click makes.
-      // This is local-dev-only: production never sets RELAY_LOCAL_QUEUE_URL and uses
-      // signed real-QStash callbacks instead (confirmed working in production per
-      // docs/production-smoke-runbook.md's step 6 and the 2026-08-25 dev-log entry it
-      // cites) — so this assertion is scoped to the one failure shape this bug
-      // actually produces, and would correctly start FAILING (which is the point) the
-      // moment either side of that hand-off is fixed to agree on the header.
+      // Two real, reproduced local-dev-only bugs USED to make this the only branch this
+      // test ever took, both now fixed:
+      //
+      //  1. `apps/proxy/src/services/qstash.ts`'s `RELAY_LOCAL_QUEUE_URL` local-loop
+      //     branch sent NO Authorization header when it POSTed the envelope to the
+      //     dashboard's local consumer stand-in, but
+      //     `apps/dashboard/pages/api/relay/qstash-test.ts` unconditionally requires a
+      //     valid `Bearer <RELAY_API_SECRET>` and 401s without one — reproduced directly
+      //     with `curl` outside Playwright (the same secret got 400 "bad body" WITH the
+      //     header, 401 WITHOUT it, proving the secret matched and the header was the
+      //     actual gap). Fixed by adding the header, reading the same
+      //     `RELAY_API_SECRET` the rest of the proxy already uses for this exact
+      //     proxy → dashboard pattern (`routeLookup.ts`).
+      //  2. A second, independently-discovered bug running THIS suite for real against
+      //     `npm run start` (`NODE_ENV=production`, the exact config this file's own
+      //     `playwright.config.ts` `webServer.command` uses): `middleware.ts`'s
+      //     unauthenticated allowlist for `/api/relay/qstash-test` /
+      //     `/api/relay/smoke-destination` was gated on `NODE_ENV === 'production' ? []
+      //     : [...]` with no Host check at all — conflating a REAL deployed dashboard
+      //     with a developer's own local `next build && next start`, which is ALSO
+      //     `NODE_ENV=production`. Both endpoints 307'd to `/auth/login` (200 HTML)
+      //     even with the correct Bearer header attached, and `qstash.ts`'s local-loop
+      //     `fetch` silently mistook that 200 for a successful publish (no `DeliveryLog`
+      //     row was ever written). Fixed by reusing `localOnlyVerdict` — the exact
+      //     three-arm check (`lib/relay/localOnly.ts`) the handlers themselves already
+      //     implement and are unit-tested against — in `middleware.ts` too, instead of a
+      //     second, less precise copy of the same rule.
+      //
+      // This branch stays as a regression guard rather than being deleted: production
+      // never sets `RELAY_LOCAL_QUEUE_URL` and uses signed real-QStash callbacks
+      // instead, so nothing here can affect it — but if either fix above ever regresses
+      // in local dev, this assertion documents and catches the exact failure shape
+      // instead of the suite failing somewhere else with a confusing message.
       expect(testSendResponse.status()).toBe(502);
       await expect(
         page.getByText('Test webhook could not be enqueued')
       ).toBeVisible();
       test.info().annotations.push({
-        type: 'known-bug',
+        type: 'regression-guard',
         description:
-          'apps/proxy/src/services/qstash.ts RELAY_LOCAL_QUEUE_URL local loop sends no ' +
-          'Authorization header; apps/dashboard/pages/api/relay/qstash-test.ts requires one ' +
-          'unconditionally. Blocks "Send test webhook" end-to-end in local dev only ' +
-          '(production is unaffected — see the inline comment above this annotation).',
+          'Hit the pre-RELAY-112-fix failure shape (502 "Test webhook could not be ' +
+          'enqueued"). Both known causes (qstash.ts missing Authorization header; ' +
+          'middleware.ts not allowlisting the local-only endpoints on a local ' +
+          'production build) were fixed and verified — if this fires, one of them has ' +
+          'regressed. See the comment above this annotation for both root causes.',
       });
     }
   });

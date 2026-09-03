@@ -144,6 +144,9 @@ function mockFetch(opts: {
 
 const lookupCalls = () => calls.filter((c) => c.url.includes('/route-lookup'));
 const publishCalls = () => calls.filter((c) => c.url.includes('/v2/publish/'));
+// [RELAY-112] The local-loop publish call (RELAY_LOCAL_QUEUE_URL bound) never hits
+// `/v2/publish/` — it goes straight at the dashboard's `qstash-test` stand-in.
+const localQueueCalls = () => calls.filter((c) => c.url.includes('/api/relay/qstash-test'));
 
 /**
  * POST an ingestion request the way a real sender does after [RELAY-71]: the per-route
@@ -920,6 +923,28 @@ describe('[RELAY-73] smoke-test SSRF waiver', () => {
   it('fires for the local smoke — dev, loopback arrival, local queue, test-marked', async () => {
     const res = await send('http://localhost:8787', localEnv);
     expect(res.status).toBe(200);
+  });
+
+  /**
+   * [RELAY-112] Regression test for the local-loop Authorization-header gap.
+   *
+   * `qstash-test.ts` (the real endpoint this call reaches in dev) unconditionally
+   * requires `Bearer <RELAY_API_SECRET>` and 401s without it — reproduced directly with
+   * `curl` outside this suite (same secret gets 400 "bad body" WITH the header, 401
+   * WITHOUT it). Before the fix, `publishToQStash`'s local-loop branch sent no
+   * `authorization` header at all, so every local `Send test` webhook 401'd against a
+   * real dashboard. This asserts the header is present and carries the exact secret the
+   * rest of the proxy already uses for proxy → dashboard calls (`routeLookup.ts`'s
+   * pattern), not a mock that would pass even with the header still missing.
+   */
+  it('[RELAY-112] sends the RELAY_API_SECRET bearer header on the local-loop publish call', async () => {
+    const res = await send('http://localhost:8787', localEnv);
+    expect(res.status).toBe(200);
+
+    const call = localQueueCalls()[0];
+    expect(call).toBeDefined();
+    const headers = call!.init?.headers as Record<string, string>;
+    expect(headers.authorization).toBe(`Bearer ${SECRET}`);
   });
 
   it('does NOT fire when the request arrived on a public hostname (the structural arm)', async () => {
