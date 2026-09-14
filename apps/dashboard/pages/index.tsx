@@ -27,6 +27,7 @@ import { serverSideTranslations } from 'next-i18next/serverSideTranslations';
 import Head from 'next/head';
 import type { ReactElement } from 'react';
 
+import AmbientBackdrop from '@/components/defaultLanding/AmbientBackdrop';
 import FoundingAccessSection from '@/components/defaultLanding/FoundingAccessSection';
 import HeroSection from '@/components/defaultLanding/HeroSection';
 import LandingFooter from '@/components/defaultLanding/LandingFooter';
@@ -61,13 +62,23 @@ const LandingPage: NextPageWithLayout = () => {
           `text-landing-secondary` body default, headings opt into
           `text-landing-primary` per-component. The route follows the same `.dark`
           class the rest of the app toggles (`lib/theme.ts`), light by default. */}
-      <div className="min-h-screen bg-landing-base text-landing-secondary antialiased">
+      <div className="relative isolate min-h-screen bg-landing-base text-landing-secondary antialiased">
         {/* [design-overhaul 2026-08] Mounted once for the whole page — see
             Reveal.tsx's file header for why this replaces a per-section wrapper. */}
         <RevealObserverMount />
-        <LandingNav />
-        <main>
-          {/* Contract §3 section order: Hero (incl. Gap) → Proof → Product → Security → Founding Access/CTA → Footer. RELAY-55: every section sells the phase that exists — Buffer — and nothing else.
+
+        {/* [director ask: light mode is "too bland and blank canvas"] Sits INSIDE this
+            wrapper, not outside it: the wrapper paints the opaque `bg-landing-base`,
+            so anything behind it is invisible by definition. `isolate` on the wrapper
+            plus the z-0/z-10 pair below is what keeps the backdrop under the content
+            without the backdrop's own `fixed` positioning floating it over the
+            unpositioned sections. See AmbientBackdrop.tsx for the placement rationale. */}
+        <AmbientBackdrop />
+
+        <div className="relative z-10">
+          <LandingNav />
+          <main>
+            {/* Contract §3 section order: Hero (incl. Gap) → Proof → Product → Security → Founding Access/CTA → Footer. RELAY-55: every section sells the phase that exists — Buffer — and nothing else.
               [RELAY-71] The Gap used to render a second time here — HeroSection already
               renders it internally (see HeroSection.tsx). That duplicate call, plus the
               since-removed LimitsSection/RoadmapSection ("what Relay cannot do
@@ -80,19 +91,20 @@ const LandingPage: NextPageWithLayout = () => {
               <5% achievable by 2026-08-19 (metering, caps, reaping and the trial timer
               are sold on the old copy and none exist as code), so this section now
               sells the free, no-billing launch shape the sprint actually targets. */}
-          <HeroSection />
-          <ProofSection />
-          <WhatItDoesSection />
-          {/* [RELAY-108] The real n8n section — see N8nSection.tsx's own header for
+            <HeroSection />
+            <ProofSection />
+            <WhatItDoesSection />
+            {/* [RELAY-108] The real n8n section — see N8nSection.tsx's own header for
               why this replaces the single incidental "n8n webhook key" mention the
               audit found. Placed right after "what it does" so the sequence reads
               as: here's the general capability, here's exactly what that means if
               you're the n8n buyer who followed a link here. */}
-          <N8nSection />
-          <SecuritySection />
-          <FoundingAccessSection />
-        </main>
-        <LandingFooter />
+            <N8nSection />
+            <SecuritySection />
+            <FoundingAccessSection />
+          </main>
+          <LandingFooter />
+        </div>
       </div>
     </>
   );
