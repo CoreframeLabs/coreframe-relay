@@ -178,16 +178,11 @@ a {
   }
 
   /* The Gap's "replay" — GapSection.tsx's own header calls this the strongest asset on
-   * the page. Sequenced (per director ask, see GapSection.tsx's header for the full
-   * timeline): both request lines "type" in first, then the left pane falls silent,
-   * then the connector pill marks Relay stepping in, then the right pane's response
-   * and retry ladder step in one line at a time with a growing gap between retries
-   * (450ms, then 550ms) so it reads as backoff — not four lines rendering at once —
-   * and finally the nested `RelayFlowDiagram` terminal appears as the conclusion.
-   * Every element below follows the same armed/revealed contract as `.relay-reveal-init`
-   * itself: hidden only once JS has confirmed reduced-motion is off (see this block's
-   * own file-level comment above), so a reduced-motion or no-JS client never sees any
-   * of these opacity/clip-path states — only the final, fully-rendered DOM. */
+   * the page. Every element below follows the same armed/revealed contract as
+   * `.relay-reveal-init` itself: hidden only once JS has confirmed reduced-motion is
+   * off (see this block's own file-level comment above), so a reduced-motion or no-JS
+   * client never sees any of these opacity/clip-path states — only the final,
+   * fully-rendered DOM, and no loop. */
   .relay-reveal-init .relay-gap-request {
     clip-path: inset(0 100% 0 0);
   }
@@ -202,47 +197,102 @@ a {
     opacity: 0;
   }
 
-  /* 1. Both request lines type in together — one request, two outcomes; the
-   *    divergence only starts once the request has actually "landed". */
+  /* ── The continuous cycle ────────────────────────────────────────────────────
+   * [gap-loop, director ask: "continuous like a real computer, real calls going and
+   * looped"] The traffic elements below no longer stagger via `animation-delay` +
+   * `forwards`. `animation-delay` CANNOT express "loop the whole staged sequence":
+   * with `infinite` the delay applies to the first iteration only, so each element
+   * would then re-run its own 220ms fade every 220ms, and nothing would stay in
+   * phase with anything else. The fix is the one CSS does support — every traffic
+   * element runs the SAME 11s period with `infinite`, and its position in the
+   * sequence is encoded as PERCENTAGE STOPS inside its own keyframe set. Same
+   * period everywhere ⇒ they can never drift apart, and the clear-down at 81.8%
+   * lands on all of them on the same frame.
+   *
+   * The percentages are just `ms / 11000`. Keeping the original ms timeline visible
+   * is the whole point of this table, because `15.91%` on its own says nothing:
+   *
+   *   150–800ms   ( 1.4→ 7.3%)  request types in (both panes, in lock-step)
+   *   900–1200ms  ( 8.2→10.9%)  left pane falls silent
+   *   950–2050ms  ( 8.6→18.6%)  connector dot pulses twice (Relay takes the call)
+   *   1400–1650ms (12.7→15.0%)  With pane answers 200 queued
+   *   1750–1970ms (15.9→17.9%)  attempt 1 → 503
+   *   2200–2420ms (20.0→22.0%)  attempt 2 → 503   (450ms gap — backoff)
+   *   2750–2970ms (25.0→27.0%)  attempt 3 → 200 ✓ (550ms gap — backoff widens)
+   *   9000–9600ms (81.8→87.3%)  everything clears
+   *   9600–11000ms(87.3→100 %)  BLANK BEAT — this is what makes the restart read
+   *                             as the next call arriving rather than a glitch.
+   *
+   * The connector PILL and the nested diagram are deliberately NOT in this list:
+   * they are structure, not traffic, and still play once with `forwards`. See
+   * GapSection.tsx's header for that split. */
+  .relay-reveal-init.relay-is-revealed .relay-gap-request,
+  .relay-reveal-init.relay-is-revealed .relay-gap-silence,
+  .relay-reveal-init.relay-is-revealed .relay-gap-connector-dot,
+  .relay-reveal-init.relay-is-revealed .relay-gap-response,
+  .relay-reveal-init.relay-is-revealed .relay-gap-retry-1,
+  .relay-reveal-init.relay-is-revealed .relay-gap-retry-2,
+  .relay-reveal-init.relay-is-revealed .relay-gap-retry-3 {
+    animation-duration: var(--relay-gap-cycle);
+    animation-timing-function: ease-out;
+    animation-iteration-count: infinite;
+  }
+
   .relay-reveal-init.relay-is-revealed .relay-gap-request {
-    animation: relay-gap-type 650ms steps(22, end) 150ms forwards;
+    animation-name: relay-gap-cycle-request;
   }
 
-  /* 2. Left pane falls silent. */
   .relay-reveal-init.relay-is-revealed .relay-gap-silence {
-    animation: relay-gap-in 300ms ease-out 900ms forwards;
+    animation-name: relay-gap-cycle-silence;
   }
 
-  /* 3. The connection moment: Relay enters the picture between the two panes. */
+  .relay-reveal-init.relay-is-revealed .relay-gap-connector-dot {
+    animation-name: relay-gap-cycle-dot;
+    animation-timing-function: ease-in-out;
+  }
+
+  .relay-reveal-init.relay-is-revealed .relay-gap-response {
+    animation-name: relay-gap-cycle-response;
+  }
+
+  .relay-reveal-init.relay-is-revealed .relay-gap-retry-1 {
+    animation-name: relay-gap-cycle-retry-1;
+  }
+
+  .relay-reveal-init.relay-is-revealed .relay-gap-retry-2 {
+    animation-name: relay-gap-cycle-retry-2;
+  }
+
+  .relay-reveal-init.relay-is-revealed .relay-gap-retry-3 {
+    animation-name: relay-gap-cycle-retry-3;
+  }
+
+  /* Structure, not traffic — one-shot, then it stays put. */
   .relay-reveal-init.relay-is-revealed .relay-gap-connector-inner {
     animation: relay-gap-in 250ms ease-out 950ms forwards;
   }
 
-  .relay-reveal-init.relay-is-revealed .relay-gap-connector-dot {
-    animation: relay-gap-dot-pulse 550ms ease-in-out 950ms 2;
-  }
-
-  /* 4. The With pane answers, then the retry ladder climbs one attempt at a time. */
-  .relay-reveal-init.relay-is-revealed .relay-gap-response {
-    animation: relay-gap-in 250ms ease-out 1400ms forwards;
-  }
-
-  .relay-reveal-init.relay-is-revealed .relay-gap-retry-1 {
-    animation: relay-gap-in 220ms ease-out 1750ms forwards;
-  }
-
-  .relay-reveal-init.relay-is-revealed .relay-gap-retry-2 {
-    animation: relay-gap-in 220ms ease-out 2200ms forwards;
-  }
-
-  .relay-reveal-init.relay-is-revealed .relay-gap-retry-3 {
-    animation: relay-gap-in 220ms ease-out 2750ms forwards;
-  }
-
-  /* 5. The surviving flow-diagram terminal — the sequence's conclusion. */
   .relay-reveal-init.relay-is-revealed .relay-gap-diagram {
     animation: relay-gap-in 300ms ease-out 3150ms forwards;
   }
+}
+
+/* Off-screen / backgrounded-tab pause, toggled by `GapSection.tsx`'s
+ * `usePauseWhenUnseen`. Outside the reduced-motion media query on purpose: it is a
+ * pause, so it is safe (and a no-op) whatever the motion preference resolves to. */
+.relay-gap-paused
+  :is(
+    .relay-gap-request,
+    .relay-gap-silence,
+    .relay-gap-connector-inner,
+    .relay-gap-connector-dot,
+    .relay-gap-response,
+    .relay-gap-retry-1,
+    .relay-gap-retry-2,
+    .relay-gap-retry-3,
+    .relay-gap-diagram
+  ) {
+  animation-play-state: paused;
 }
 
 @keyframes relay-reveal-in {
@@ -263,29 +313,207 @@ a {
   }
 }
 
+/* [director ask: light-mode landing is "too bland and blank canvas"] The static half
+ * of `AmbientBackdrop.tsx` — three soft teal blooms, no motion, no JS. Always
+ * painted, including for reduced-motion and no-WebGL visitors, so the accessible
+ * path gets a real answer to the complaint rather than the blank page it was.
+ * Alphas are theme-split rather than shared: the same value that reads as a whisper
+ * on the #0d0f12 dark base reads as a smudge on the #f7f8fa light one. Deliberately
+ * raw rgba and not the `--landing-*` tokens — those are solid surface/text colours
+ * and none of them is the near-transparent tint a gradient stop needs. */
+.relay-ambient-wash {
+  background-image:
+    radial-gradient(
+      58rem 34rem at 12% 6%,
+      rgba(13, 148, 136, 0.08),
+      transparent 68%
+    ),
+    radial-gradient(
+      46rem 30rem at 90% 38%,
+      rgba(13, 148, 136, 0.06),
+      transparent 68%
+    ),
+    radial-gradient(
+      54rem 30rem at 46% 104%,
+      rgba(13, 148, 136, 0.06),
+      transparent 68%
+    );
+}
+
+.dark .relay-ambient-wash {
+  background-image:
+    radial-gradient(
+      58rem 34rem at 12% 6%,
+      rgba(45, 212, 191, 0.06),
+      transparent 68%
+    ),
+    radial-gradient(
+      46rem 30rem at 90% 38%,
+      rgba(45, 212, 191, 0.045),
+      transparent 68%
+    ),
+    radial-gradient(
+      54rem 30rem at 46% 104%,
+      rgba(45, 212, 191, 0.045),
+      transparent 68%
+    );
+}
+
+/* One cycle of the Gap replay. Declared once here rather than repeated in seven
+ * `animation-duration`s so the whole sequence can be retimed by editing one value
+ * — the percentage stops below are all relative to it. */
+:root {
+  --relay-gap-cycle: 11s;
+}
+
 /* The request-line "typewriter": reveals the line left-to-right via `clip-path`
  * rather than animating `width`, so it keeps working with the line's existing
  * `whitespace-pre-wrap break-all` (a fixed-width/`nowrap` typewriter would fight
- * that wrapping on narrow viewports). `steps()` gives it a discrete, typed
- * cadence rather than a smooth wipe. */
-@keyframes relay-gap-type {
-  to {
+ * that wrapping on narrow viewports). `steps()` gives it a discrete, typed cadence
+ * rather than a smooth wipe, and is declared INSIDE the keyframe so it applies only
+ * to the typing interval — the fade-out at the end of the cycle stays smooth. The
+ * clip-path snaps back to fully-clipped in the last 0.1% of the cycle, after the
+ * line is already at opacity 0, so the retype starts from a genuinely blank line
+ * instead of un-wiping in reverse on screen. */
+@keyframes relay-gap-cycle-request {
+  0%,
+  1.4% {
+    clip-path: inset(0 100% 0 0);
+    opacity: 1;
+    animation-timing-function: steps(22, end);
+  }
+  7.3%,
+  81.8% {
     clip-path: inset(0 0 0 0);
+    opacity: 1;
+  }
+  87.3%,
+  99.9% {
+    clip-path: inset(0 0 0 0);
+    opacity: 0;
+  }
+  100% {
+    clip-path: inset(0 100% 0 0);
+    opacity: 0;
   }
 }
 
-/* The connector's dot: a brief, finite pulse (2 iterations, not `infinite`) —
- * this is a one-time "Relay steps in" beat, matching the Gap replay's own
- * "played once" contract, not an ambient always-on animation. */
-@keyframes relay-gap-dot-pulse {
+@keyframes relay-gap-cycle-silence {
   0%,
+  8.2% {
+    opacity: 0;
+    transform: translateY(4px);
+  }
+  10.9%,
+  81.8% {
+    opacity: 1;
+    transform: translateY(0);
+  }
+  87.3%,
+  100% {
+    opacity: 0;
+    transform: translateY(0);
+  }
+}
+
+/* The connector's dot: two pulses per cycle, at the moment Relay takes the call —
+ * then idle for the rest of the cycle. Not a constant heartbeat: a dot ticking
+ * nonstop beside body copy is the distracting kind of motion, and it would also
+ * decouple the pill from the request it is supposed to be reacting to. */
+@keyframes relay-gap-cycle-dot {
+  0%,
+  8.6% {
+    transform: scale(1);
+    opacity: 1;
+  }
+  11.1% {
+    transform: scale(1.6);
+    opacity: 0.6;
+  }
+  13.6% {
+    transform: scale(1);
+    opacity: 1;
+  }
+  16.1% {
+    transform: scale(1.6);
+    opacity: 0.6;
+  }
+  18.6%,
   100% {
     transform: scale(1);
     opacity: 1;
   }
-  50% {
-    transform: scale(1.6);
-    opacity: 0.6;
+}
+
+@keyframes relay-gap-cycle-response {
+  0%,
+  12.7% {
+    opacity: 0;
+    transform: translateY(4px);
+  }
+  15%,
+  81.8% {
+    opacity: 1;
+    transform: translateY(0);
+  }
+  87.3%,
+  100% {
+    opacity: 0;
+    transform: translateY(0);
+  }
+}
+
+@keyframes relay-gap-cycle-retry-1 {
+  0%,
+  15.9% {
+    opacity: 0;
+    transform: translateY(4px);
+  }
+  17.9%,
+  81.8% {
+    opacity: 1;
+    transform: translateY(0);
+  }
+  87.3%,
+  100% {
+    opacity: 0;
+    transform: translateY(0);
+  }
+}
+
+@keyframes relay-gap-cycle-retry-2 {
+  0%,
+  20% {
+    opacity: 0;
+    transform: translateY(4px);
+  }
+  22%,
+  81.8% {
+    opacity: 1;
+    transform: translateY(0);
+  }
+  87.3%,
+  100% {
+    opacity: 0;
+    transform: translateY(0);
+  }
+}
+
+@keyframes relay-gap-cycle-retry-3 {
+  0%,
+  25% {
+    opacity: 0;
+    transform: translateY(4px);
+  }
+  27%,
+  81.8% {
+    opacity: 1;
+    transform: translateY(0);
+  }
+  87.3%,
+  100% {
+    opacity: 0;
+    transform: translateY(0);
   }
 }
 

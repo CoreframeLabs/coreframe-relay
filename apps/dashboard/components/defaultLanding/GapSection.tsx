@@ -24,9 +24,34 @@
  * `.relay-reveal` → `RevealObserverMount` → `.relay-reveal-init`/`.relay-is-revealed`
  * classList contract in `Reveal.tsx` and `globals.css`. Nothing here adds a second
  * trigger: every timed element below is still just a `globals.css` rule keyed off
- * `.relay-reveal-init.relay-is-revealed <selector>` with its own `animation-delay`,
- * so the whole sequence starts exactly when the section scrolls into view, once,
- * same as before.
+ * `.relay-reveal-init.relay-is-revealed <selector>`, so the whole sequence starts
+ * exactly when the section scrolls into view, same as before.
+ *
+ * [gap-loop, director ask: "it should be continuous like a real computer, real calls
+ * going and looped, this is too basic"] The sequence above no longer plays once and
+ * freeze-frames — it is now a CONTINUOUS 11s cycle. Split deliberately in two:
+ *
+ *   TRAFFIC (loops forever): the request line retypes, the left pane falls silent
+ *   again, the connector dot pulses, and the response + retry ladder reclimb —
+ *   then all of it clears at 9s and the pane sits blank for ~1.4s before the next
+ *   request lands. The blank beat is the point: it is what makes the restart read
+ *   as "here comes the next call", not as a glitchy reset.
+ *
+ *   STRUCTURE (still plays once, `forwards`): the connector pill and the nested
+ *   `RelayFlowDiagram` terminal. These are not traffic — the pill says "Relay is in
+ *   this request's path" and the diagram is the conclusion of the argument. Fading a
+ *   ~120px-tall terminal in and out every 11s in the reader's peripheral vision would
+ *   be the distracting kind of motion, and it would also imply the topology itself is
+ *   something that comes and goes. They appear once and stay.
+ *
+ * It stays pure CSS (`animation-iteration-count: infinite`, one keyframe set per
+ * element with the whole cycle encoded as percentage stops — see the timeline table
+ * in `globals.css`), so the loop costs zero new JS. The ONLY JS this file adds is the
+ * pause guard below: `animation-play-state: paused` while the section is off-screen
+ * or the tab is backgrounded, which is the same IntersectionObserver +
+ * `visibilitychange` pair `WebhookFlowScene.tsx` uses for its rAF loop. An infinite
+ * animation compositing forever behind a scrolled-past viewport is a real battery
+ * cost, and it is exactly the cost a one-shot sequence never had.
  *
  * `prefers-reduced-motion: reduce` disables ALL of it wholesale, same contract as
  * always in this file: the hidden/typing/staggered states only exist as CSS rules
@@ -34,8 +59,10 @@
  * reduced-motion client never gets `.relay-reveal-init` added at all (see
  * `RevealObserverMount`) and renders every element in this component in its final,
  * fully-visible DOM state on first paint — no sequence to wait through, nothing to
- * skip. Bundle cost is zero new JS: everything is `clip-path`/`opacity` keyframes,
- * the same idiom `RelayFlowDiagram`'s own wire pulses already use on this page.
+ * skip, and CRITICALLY no loop to sit through either: a reduced-motion visitor gets
+ * the single, static "after" frame, never a spinning cycle. Everything is
+ * `clip-path`/`opacity` keyframes, the same idiom `RelayFlowDiagram`'s own wire
+ * pulses already use on this page.
  *
  * [Launch-shape change] The "Saved Payloads: 0" counter that used to sit under the two
  * panes is CUT. The zero-customer confession only needs to appear once on the page (the
@@ -55,7 +82,7 @@
  * `--landing-*` tokens `RelayFlowDiagram`'s own accent `Node` already uses, rather
  * than a fixed hex colour, and needs verifying in both themes for exactly that reason.
  */
-import type { ReactNode } from 'react';
+import { useEffect, useRef, type ReactNode } from 'react';
 
 import RelayFlowDiagram from './RelayFlowDiagram';
 
@@ -123,9 +150,18 @@ const Pane = ({
     className={`overflow-hidden rounded-xl border border-[#24262c] bg-[#191b20] ${className}`}
   >
     <div className="flex items-center gap-2 border-b border-[#24262c] bg-[#131518] px-4 py-2.5">
-      <span aria-hidden="true" className="h-2.5 w-2.5 rounded-full bg-zinc-700" />
-      <span aria-hidden="true" className="h-2.5 w-2.5 rounded-full bg-zinc-700" />
-      <span aria-hidden="true" className="h-2.5 w-2.5 rounded-full bg-zinc-700" />
+      <span
+        aria-hidden="true"
+        className="h-2.5 w-2.5 rounded-full bg-zinc-700"
+      />
+      <span
+        aria-hidden="true"
+        className="h-2.5 w-2.5 rounded-full bg-zinc-700"
+      />
+      <span
+        aria-hidden="true"
+        className="h-2.5 w-2.5 rounded-full bg-zinc-700"
+      />
       <p className="ml-2 font-mono text-[11px] uppercase tracking-wider text-zinc-500">
         {label}
       </p>
@@ -134,7 +170,53 @@ const Pane = ({
   </div>
 );
 
+/**
+ * Adds/removes `relay-gap-paused` (→ `animation-play-state: paused` in
+ * `globals.css`) on the replay container while it is off-screen or the tab is
+ * backgrounded. Same IntersectionObserver + `visibilitychange` pair
+ * `WebhookFlowScene.tsx` gates its rAF loop with — an always-on CSS animation has
+ * the same "costs the machine something forever" problem a rAF loop does.
+ *
+ * The two signals are tracked as SEPARATE booleans rather than folded into one
+ * mutable `running` flag. Folding them latches: `running = !document.hidden &&
+ * running` can only ever drive the flag to false, so once a tab is backgrounded the
+ * animation never resumes until the observer happens to fire again. Keeping them
+ * separate and re-deriving `paused` from both is what makes un-backgrounding work.
+ */
+function usePauseWhenUnseen(ref: React.RefObject<HTMLElement | null>) {
+  useEffect(() => {
+    const el = ref.current;
+    if (!el || typeof IntersectionObserver === 'undefined') return;
+
+    let onScreen = true;
+    const apply = () =>
+      el.classList.toggle('relay-gap-paused', !onScreen || document.hidden);
+
+    const io = new IntersectionObserver(
+      ([entry]) => {
+        onScreen = entry.isIntersecting;
+        apply();
+      },
+      { threshold: 0 }
+    );
+    io.observe(el);
+
+    document.addEventListener('visibilitychange', apply);
+
+    return () => {
+      io.disconnect();
+      document.removeEventListener('visibilitychange', apply);
+      // Never leave the class behind: a paused-forever replay would be a worse
+      // frozen frame than the one-shot version this replaced.
+      el.classList.remove('relay-gap-paused');
+    };
+  }, [ref]);
+}
+
 const GapSection = () => {
+  const replayRef = useRef<HTMLDivElement>(null);
+  usePauseWhenUnseen(replayRef);
+
   // `relay-gap-request` drives the typewriter reveal (CSS `clip-path` steps in
   // `globals.css`) — both panes render this exact same node, so both request
   // lines type in lock-step: the story is one request, two outcomes, and the
@@ -148,7 +230,10 @@ const GapSection = () => {
 
   return (
     <div>
-      <div className="relay-reveal relative grid gap-4 lg:grid-cols-2 lg:gap-10">
+      <div
+        ref={replayRef}
+        className="relay-reveal relative grid gap-4 lg:grid-cols-2 lg:gap-10"
+      >
         <Pane label="Without Relay" className="relay-gap-left">
           {requestLine}
           <div className="mt-4 min-h-[5.5rem] rounded-lg border border-dashed border-zinc-800 bg-[#0d0f12] p-4">
@@ -179,13 +264,16 @@ const GapSection = () => {
           </pre>
           <ol className="mt-4 space-y-1 font-mono text-xs leading-6">
             <li className="relay-gap-retry-1 text-amber-400">
-              attempt 1 → 503 <span className="text-zinc-500">· retry queued</span>
+              attempt 1 → 503{' '}
+              <span className="text-zinc-500">· retry queued</span>
             </li>
             <li className="relay-gap-retry-2 text-amber-400">
-              attempt 2 → 503 <span className="text-zinc-500">· retry queued</span>
+              attempt 2 → 503{' '}
+              <span className="text-zinc-500">· retry queued</span>
             </li>
             <li className="relay-gap-retry-3 text-emerald-400">
-              attempt 3 → 200 ✓ <span className="text-zinc-500">· delivered</span>
+              attempt 3 → 200 ✓{' '}
+              <span className="text-zinc-500">· delivered</span>
             </li>
           </ol>
 
