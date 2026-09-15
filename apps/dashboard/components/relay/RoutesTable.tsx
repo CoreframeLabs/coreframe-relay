@@ -10,7 +10,7 @@ import {
   type SortingState,
 } from '@tanstack/react-table';
 import type { Route, RouteStatus } from '@prisma/client';
-import { Check, Copy, Eye, EyeOff, Loader2, RotateCw } from 'lucide-react';
+import { Check, Copy, Eye, EyeOff, Loader2, Pencil, RotateCw } from 'lucide-react';
 import {
   Table,
   TableBody,
@@ -23,6 +23,7 @@ import { Button } from '@/components/ui/button';
 import { StatusBadge } from './StatusBadge';
 import { CopyableUrl } from './CopyableUrl';
 import { SendTestButton } from './SendTestButton';
+import { EditDestinationDialog } from './EditDestinationDialog';
 import { cn } from '@/lib/utils';
 
 /** A Route as the API returns it — the model plus its derived public URL. */
@@ -65,6 +66,7 @@ export function RoutesTable({
   filter,
   teamSlug,
   onRotated,
+  onUpdated,
 }: {
   routes: RouteRow[];
   filter: RouteStatus | 'ALL';
@@ -72,6 +74,9 @@ export function RoutesTable({
   teamSlug: string;
   /** [RELAY-57] invoked after a rotation so the SWR cache refetches with the new URL. */
   onRotated: () => void;
+  /** [RELAY-128] invoked after a successful destination/retry/status edit, same
+   *  "refetch via the caller's own SWR mutate" contract `onRotated` already uses. */
+  onUpdated: () => void;
 }) {
   const [sorting, setSorting] = useState<SortingState>([{ id: 'createdAt', desc: true }]);
   const { t } = useTranslation('common');
@@ -87,6 +92,12 @@ export function RoutesTable({
   const [copiedId, setCopiedId] = useState<string | null>(null);
   const [rotatingId, setRotatingId] = useState<string | null>(null);
   const [rotateError, setRotateError] = useState<string | null>(null);
+
+  // [RELAY-128] "Edit destination" dialog. `editingRoute` (not just a boolean) so the
+  // dialog can re-seed its form from whichever row was clicked, and so closing it
+  // (including via the underlying Dialog's own Escape/overlay-click handling) can
+  // clear the reference rather than leaving a stale row pinned in state.
+  const [editingRoute, setEditingRoute] = useState<RouteRow | null>(null);
 
   const toggleReveal = (id: string) =>
     setRevealedIds((current) => {
@@ -312,23 +323,48 @@ export function RoutesTable({
         enableSorting: false,
         cell: (info) => {
           const route = info.row.original;
-          // A PAUSED route is the one an operator is debugging — the button must
-          // remain visible there. ARCHIVED rows do not reach this table today, so
-          // the guard is written as an allow-list so a new status fails closed.
-          if (route.status !== 'ACTIVE' && route.status !== 'FAILING') {
-            return null;
-          }
+          // [RELAY-50] "Send test" is the one an operator debugging a live pipeline
+          // needs, so it stays gated to ACTIVE/FAILING (a PAUSED route 404s any real
+          // send anyway — see apps/proxy/src/routes/ingest.ts). ARCHIVED rows do not
+          // reach this table today, so the guard is an allow-list that fails closed.
+          const canSendTest = route.status === 'ACTIVE' || route.status === 'FAILING';
           return (
-            <div className="relative flex justify-end">
-              <SendTestButton
-                routeId={route.id}
-                teamSlug={teamSlug}
-                routeName={route.name}
-              />
+            <div className="relative flex items-center justify-end gap-1">
+              {canSendTest && (
+                <SendTestButton
+                  routeId={route.id}
+                  teamSlug={teamSlug}
+                  routeName={route.name}
+                />
+              )}
+              {/* [RELAY-128] Edit destination — available regardless of status,
+                  since resuming a PAUSED route or fixing a fat-fingered URL are
+                  exactly the two things this dialog exists for. `setEditingRoute`
+                  is a `useState` setter (stable identity), so referencing it here
+                  does not reintroduce the per-render `cell` identity churn
+                  RELAY-112's own fix (this memo, keyed only on `teamSlug`) exists
+                  to prevent. */}
+              <Button
+                type="button"
+                variant="ghost"
+                size="icon"
+                className="h-7 w-7 shrink-0"
+                onClick={() => setEditingRoute(route)}
+                aria-label={`Edit destination for ${route.name}`}
+                title="Edit destination"
+              >
+                <Pencil className="h-3.5 w-3.5" aria-hidden="true" />
+              </Button>
             </div>
           );
         },
       }),
+    // `setEditingRoute` (useState setter) is intentionally omitted: it is stable for
+    // the life of this component, and including it would defeat no purpose while
+    // inviting a future edit to add something unstable to this list — the entire
+    // point of this memo, per the RELAY-112 comment above it, is that it NOT rebuild
+    // on anything but `teamSlug`.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
     [teamSlug]
   );
 
@@ -381,6 +417,7 @@ export function RoutesTable({
   }
 
   return (
+    <>
     <div className="rounded-lg border">
       {rotateError && (
         // [RELAY-105] Was unconditionally 'border-red-500/30 bg-red-500/5 text-red-400'
@@ -457,5 +494,22 @@ export function RoutesTable({
         </TableBody>
       </Table>
     </div>
+
+    {/* [RELAY-128] Rendered once for the table rather than per-row: only one row's
+        edit is ever open at a time, and `editingRoute` (not a boolean) already
+        carries which one. */}
+    <EditDestinationDialog
+      open={editingRoute !== null}
+      onOpenChange={(next) => {
+        if (!next) setEditingRoute(null);
+      }}
+      teamSlug={teamSlug}
+      route={editingRoute}
+      onUpdated={() => {
+        setEditingRoute(null);
+        onUpdated();
+      }}
+    />
+    </>
   );
 }

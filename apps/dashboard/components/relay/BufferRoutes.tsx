@@ -88,6 +88,12 @@ export function BufferRoutes() {
           filter={filter}
           teamSlug={slug ?? ''}
           onRotated={() => mutate()}
+          // [RELAY-128] Same "revalidate via the page's own SWR key" contract as
+          // `onRotated` — the server, not this component, owns the final
+          // destination/maxRetries/status after a PATCH (its own SSRF re-check can
+          // reshape nothing the client already assumed, but the row should still
+          // reflect exactly what got persisted).
+          onUpdated={() => mutate()}
         />
       )}
 
