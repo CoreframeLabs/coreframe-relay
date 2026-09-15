@@ -52,6 +52,15 @@ const SECTIONS: LegalSection[] = [
     title: 'How billing works',
     body: [
       'Coreframe Relay currently offers a single flat monthly subscription, shown and charged at checkout via Stripe. There is no free trial on this plan today — payment is taken when you complete checkout, and your subscription then renews automatically every month on the same date until you cancel. We do not currently offer an annual or multi-month plan.',
+      <>
+        <strong className="text-landing-primary">
+          Checkout is currently running in Stripe test mode.
+        </strong>{' '}
+        The plan, price and everything else on this page describe how billing
+        will work once live payments are switched on; no real card is charged
+        by attempting checkout today. See the checkout page itself for the
+        current status.
+      </>,
     ],
   },
   {
