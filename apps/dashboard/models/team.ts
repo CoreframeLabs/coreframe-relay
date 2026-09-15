@@ -77,6 +77,12 @@ export const getByCustomerId = async (
  *   - `lib/relay/dlqNotify.ts`'s `notifyDlqFallback` reads `slackWebhookUrl`
  *     (the DLQ Slack-vs-email gate — NOT dead code, even though the column is
  *     NULL for every team today; see the column's own schema comment)
+ *   - `lib/relay/dlqNotify.ts`'s `notifyDlqGrowthThreshold` [RELAY-124] reads
+ *     `slackWebhookUrl`, `slug` and `name` — a SECOND reader of the same gate,
+ *     added on a branch that merged ~8 minutes after this audit was written and
+ *     so is absent from the original enumeration above. No select change was
+ *     needed (all three fields were already listed), which is exactly why the
+ *     omission never surfaced as a failure.
  *   - `pages/api/auth/join.ts` reads `name` (for a Slack notification)
  *   - `pages/api/auth/sso/verify.ts` reads `id`
  *   - `pages/api/teams/[slug]/index.ts`'s GET handler returns the WHOLE object
