@@ -4,14 +4,13 @@ import { sendVerificationEmail } from '@/lib/email/sendVerificationEmail';
 import { extractEmailDomain, isEmailAllowed } from '@/lib/email/utils';
 import env from '@/lib/env';
 import { ApiError } from '@/lib/errors';
-import { createTeam, getTeam, isTeamExists } from 'models/team';
+import { createTeam, getTeam, isTeamExists, PublicTeam } from 'models/team';
 import { createUser, getUser } from 'models/user';
 import type { NextApiRequest, NextApiResponse } from 'next';
 import { recordMetric } from '@/lib/metrics';
 import { getInvitation, isInvitationExpired } from 'models/invitation';
 import { validateRecaptcha } from '@/lib/recaptcha';
 import { slackNotify } from '@/lib/slack';
-import { Team } from '@prisma/client';
 import { createVerificationToken } from 'models/verificationToken';
 import { userJoinSchema, validateWithSchema } from '@/lib/zod';
 
@@ -121,7 +120,7 @@ const handlePOST = async (req: NextApiRequest, res: NextApiResponse) => {
     emailVerified: invitation ? new Date() : null,
   });
 
-  let userTeam: Team | null = null;
+  let userTeam: PublicTeam | null = null;
 
   // Create team if user is not invited
   // So we can create the team with the user as the owner

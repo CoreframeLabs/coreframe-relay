@@ -2,7 +2,11 @@ import type { NextApiRequest, NextApiResponse } from 'next';
 import { getCookie } from 'cookies-next';
 import { getSession } from '@/lib/session';
 import { sessionTokenCookieName } from '@/lib/nextAuth';
-import { findManySessions } from 'models/session';
+import {
+  findManySessions,
+  findSessionIdByToken,
+  PUBLIC_SESSION_SELECT,
+} from 'models/session';
 
 export default async function handler(
   req: NextApiRequest,
@@ -32,18 +36,29 @@ const handleGET = async (req: NextApiRequest, res: NextApiResponse) => {
   const session = await getSession(req, res);
   const sessionToken = await getCookie(sessionTokenCookieName, { req, res });
 
-  let sessions = await findManySessions({
-    where: {
-      userId: session?.user.id,
-    },
-  });
+  // [RELAY-127] `sessionToken` is never selected here — it is a live bearer
+  // credential under the database session strategy. `isCurrent` is derived by
+  // comparing ids against a SEPARATE, single-row lookup keyed by the cookie
+  // value, so the raw token only ever touches that one throwaway object and
+  // never the array this handler responds with.
+  const [sessions, currentSession] = await Promise.all([
+    findManySessions({
+      where: {
+        userId: session?.user.id,
+      },
+      select: PUBLIC_SESSION_SELECT,
+    }),
+    sessionToken ? findSessionIdByToken(sessionToken) : Promise.resolve(null),
+  ]);
 
   sessions.map(
-    (session) => (session['isCurrent'] = session.sessionToken === sessionToken)
+    (session) => (session['isCurrent'] = session.id === currentSession?.id)
   );
 
-  // Sort sessions by most recent
-  sessions = sessions.sort(
+  // Sort sessions by most recent. `Array.prototype.sort` mutates in place and
+  // returns the same reference, so no reassignment is needed (or possible —
+  // `sessions` is a `const` from the destructure above).
+  sessions.sort(
     (a, b) => Number(new Date(b.expires)) - Number(new Date(a.expires))
   );
 
