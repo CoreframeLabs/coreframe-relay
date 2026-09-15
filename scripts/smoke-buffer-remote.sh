@@ -16,16 +16,25 @@
 #
 # THE REAL PATH THIS SCRIPT PROVES, END TO END, AGAINST REAL PRODUCTION:
 #
-#   - A route's `destination` is fixed at CREATE time and there is NO public API to
-#     change it afterwards (grepped: the only caller of `updateRoute` with an arbitrary
-#     destination is test-send.ts's own catcher round-trip, which restores it in a
-#     `finally`). So "re-point the destination" cannot mean an API call this script
-#     controls — it has to mean the EXTERNAL destination's own behaviour changes while
-#     its URL stays fixed. webhook.site supports exactly that: `PUT /token/:uuid` sets
-#     the `default_status` the token's public URL answers with, with no auth required
-#     for this. One route, one real `destination`, two behaviours over its lifetime —
-#     this is what "genuinely external, real async QStash delivery" means when the
-#     product itself has no destination-swap feature to call instead.
+#   - [RELAY-123, superseding the note below] A route's `destination` CAN now be
+#     changed after creation, for real, via `PATCH /api/teams/:slug/relay/routes/
+#     :routeId` — a session-authenticated endpoint this same ticket added. Steps 7/8
+#     below now call it directly, on the SAME route created in step 4, to point the
+#     route at a second real webhook.site token (started at 500) for the DLQ leg and
+#     back at the ORIGINAL token for the retry leg — proving the DLQ/retry round trip
+#     through a genuine destination CHANGE, not a fixed URL whose upstream behaviour
+#     was toggled underneath it.
+#
+#   - THE WORKAROUND THIS REPLACES (kept here for history — no longer what steps 7/8
+#     do): before RELAY-123, a route's `destination` was fixed at CREATE time with no
+#     public API to change it (the only caller of `updateRoute` with an arbitrary
+#     destination was test-send.ts's own catcher round-trip, which restores it in a
+#     `finally`). "Re-point the destination" could only mean the EXTERNAL
+#     destination's own behaviour changing while its URL stayed fixed — webhook.site's
+#     `PUT /token/:uuid`, which sets the `default_status` the token's public URL
+#     answers with, no auth required. That was a real, working proof of the DLQ path,
+#     but it never exercised the product's own destination-edit surface, because the
+#     product did not have one yet.
 #
 #   - `/api/relay/routes` is created WITHOUT `destinationHeaders`. RELAY_DESTINATION_
 #     HEADERS_KEY does not exist in production (a separately tracked, real defect —
@@ -62,10 +71,13 @@
 #                    async QStash round trip, not a synchronous local shortcut
 #   6  test-send     real POST …/routes/:id/test-send (NOT gated by localOnly — it is
 #                    a real customer-facing button), polled the same way
-#   7  DLQ           webhook.site token flipped to 500 via its own real API, a real
-#                    webhook sent, polled until DeliveryLog status=DLQ and a DlqItem
-#                    exists — real QStash retry-then-give-up, on real infrastructure
-#   8  DLQ retry     webhook.site token flipped BACK to 200, real POST
+#   7  DLQ           [RELAY-123] real PATCH …/relay/routes/:routeId re-points the
+#                    ROUTE's destination at a second webhook.site token (started at
+#                    500), a real webhook sent, polled until DeliveryLog status=DLQ
+#                    and a DlqItem exists — real QStash retry-then-give-up, on real
+#                    infrastructure, through a genuine destination CHANGE
+#   8  DLQ retry     [RELAY-123] real PATCH …/relay/routes/:routeId points the route
+#                    BACK at the original (200) webhook.site token, real POST
 #                    …/relay/dlq/:id/retry, polled until the SAME row transitions
 #                    DLQ -> DELIVERED (proof is the status transition on one row, see
 #                    the attemptCount note below — NOT attemptCount magnitude)
@@ -268,14 +280,22 @@ poll_log "$TEST_REQ_ID" DELIVERED 90 \
 [ "$(jget "$POLL_ROW" .isTest)" = "true" ] || fail_step "test row isTest != true: $POLL_ROW"
 pass "isTest split proven for real — test=$TEST_REQ_ID isTest=true status=$(jget "$POLL_ROW" .status) (RELAY-12's billing-exclusion field, real row)"
 
-# ── STEP 7 — DLQ, real QStash retry-then-give-up ────────────────────────────
-banner 7 "DLQ — webhook.site flipped to 500 (real API), real webhook, real QStash retries"
-curl -s -m 15 -X PUT "$WEBHOOK_SITE_BASE/token/$WH_TOKEN" -H 'content-type: application/json' \
-  -d '{"default_status":500,"default_content":"smoke-fail","default_content_type":"text/plain"}' >/dev/null
-sleep 1
-FLIP_CODE="$(curl -s -o /dev/null -w '%{http_code}' -m 15 "$WH_URL")"
-[ "$FLIP_CODE" = 500 ] || fail_step "webhook.site did not actually flip to 500 (observed $FLIP_CODE) — refusing to trust an unverified destination state"
-pass "webhook.site $WH_TOKEN now answers 500 (verified with a direct GET, not assumed) — the ROUTE's destination URL is unchanged"
+# ── STEP 7 — DLQ, real QStash retry-then-give-up, via a real PATCHed destination ──
+banner 7 "DLQ — [RELAY-123] real PATCH re-points the ROUTE at a second (failing) webhook.site token"
+WH_CREATE_FAIL="$(curl -s -m 20 -X POST "$WEBHOOK_SITE_BASE/token" -H 'content-type: application/json' \
+  -d '{"default_status":500,"default_content":"smoke-fail","default_content_type":"text/plain"}')"
+WH_TOKEN_FAIL="$(jget "$WH_CREATE_FAIL" .uuid)"
+[ -n "$WH_TOKEN_FAIL" ] || fail_step "could not create the second (failing) webhook.site token: $(printf '%s' "$WH_CREATE_FAIL" | head -c 200)"
+WH_URL_FAIL="$WEBHOOK_SITE_BASE/$WH_TOKEN_FAIL"
+FLIP_CODE="$(curl -s -o /dev/null -w '%{http_code}' -m 15 "$WH_URL_FAIL")"
+[ "$FLIP_CODE" = 500 ] || fail_step "the failing webhook.site token does not actually answer 500 (observed $FLIP_CODE) — refusing to trust an unverified destination state"
+pass "second webhook.site token created — $WH_TOKEN_FAIL, verified answering 500 with a direct GET"
+
+req PATCH "$DASHBOARD_URL/api/teams/$SMOKE_TEAM/relay/routes/$ROUTE_ID" -b "$JAR" \
+  -H 'content-type: application/json' -d "{\"destination\":\"$WH_URL_FAIL\"}"
+[ "$R_CODE" = 200 ] || fail_step "PATCH routes/:routeId (point at failing destination) -> $R_CODE: $(printf '%s' "$R_BODY" | head -c 300)"
+[ "$(jget "$R_BODY" .data.destination)" = "$WH_URL_FAIL" ] || fail_step "PATCH response destination != $WH_URL_FAIL: $R_BODY"
+pass "real PATCH …/relay/routes/$ROUTE_ID -> 200, route.destination now $WH_URL_FAIL — the product's OWN destination-edit API, not a third-party status flip"
 
 DLQ_REQ_ID="$(node -e 'console.log(crypto.randomUUID())')"
 req POST "$INGEST_URL" -H 'content-type: application/json' -H "relay-request-id: $DLQ_REQ_ID" \
@@ -320,14 +340,13 @@ if [ -z "$DLQ_ITEM_ID" ]; then
 fi
 pass "real DlqItem present — id=$DLQ_ITEM_ID"
 
-# ── STEP 8 — DLQ retry, real redelivery ─────────────────────────────────────
-banner 8 "DLQ retry — webhook.site flipped back to 200, real POST …/dlq/:id/retry"
-curl -s -m 15 -X PUT "$WEBHOOK_SITE_BASE/token/$WH_TOKEN" -H 'content-type: application/json' \
-  -d '{"default_status":200,"default_content":"smoke-ok","default_content_type":"text/plain"}' >/dev/null
-sleep 1
-FLIP_CODE="$(curl -s -o /dev/null -w '%{http_code}' -m 15 "$WH_URL")"
-[ "$FLIP_CODE" = 200 ] || fail_step "webhook.site did not actually flip back to 200 (observed $FLIP_CODE)"
-pass "webhook.site $WH_TOKEN now answers 200 again — same URL the whole time, the ROUTE's destination was never touched by this script"
+# ── STEP 8 — DLQ retry, real redelivery, via a real PATCH back to the healthy destination ──
+banner 8 "DLQ retry — [RELAY-123] real PATCH points the ROUTE back at the ORIGINAL (200) destination"
+req PATCH "$DASHBOARD_URL/api/teams/$SMOKE_TEAM/relay/routes/$ROUTE_ID" -b "$JAR" \
+  -H 'content-type: application/json' -d "{\"destination\":\"$WH_URL\"}"
+[ "$R_CODE" = 200 ] || fail_step "PATCH routes/:routeId (restore original destination) -> $R_CODE: $(printf '%s' "$R_BODY" | head -c 300)"
+[ "$(jget "$R_BODY" .data.destination)" = "$WH_URL" ] || fail_step "PATCH response destination != $WH_URL: $R_BODY"
+pass "real PATCH …/relay/routes/$ROUTE_ID -> 200, route.destination back to $WH_URL — same endpoint, second real edit"
 
 req POST "$DASHBOARD_URL/api/teams/$SMOKE_TEAM/relay/dlq/$DLQ_ITEM_ID/retry" -b "$JAR"
 [ "$R_CODE" = 202 ] || fail_step "retry -> $R_CODE (expected 202 queued against real production): $(printf '%s' "$R_BODY" | head -c 300)"
@@ -345,12 +364,12 @@ pass "no duplicate DLQ entry — exactly 1 item for $DLQ_REQ_ID after the retry"
 printf '\n==============================================\n'
 printf 'SMOKE-REMOTE: PASS  (%s assertions, %s warnings)\n' "$PASSES" "$WARNS"
 printf '  account       : %s\n  team          : %s\n  route         : %s (%s)\n' "$SMOKE_EMAIL" "$SMOKE_TEAM" "$ROUTE_ID" "$ROUTE_SLUG"
-printf '  webhook.site  : %s (%s)\n' "$WH_TOKEN" "$WH_URL"
+printf '  webhook.site  : healthy=%s (%s), failing=%s (%s)\n' "$WH_TOKEN" "$WH_URL" "$WH_TOKEN_FAIL" "$WH_URL_FAIL"
 printf '  save          : requestId=%s isTest=false status=%s\n' "$SAVE_ID" "$SAVE_STATUS"
 printf '  test-send     : requestId=%s isTest=true DELIVERED\n' "$TEST_REQ_ID"
-printf '  dlq -> retry  : requestId=%s dlqItem=%s -> DELIVERED\n' "$DLQ_REQ_ID" "$DLQ_ITEM_ID"
+printf '  dlq -> retry  : requestId=%s dlqItem=%s -> DELIVERED [RELAY-123: via 2 real PATCH …/routes/%s calls, not a webhook.site status flip]\n' "$DLQ_REQ_ID" "$DLQ_ITEM_ID" "$ROUTE_ID"
 printf '\n  CLEANUP OWED (not performed by this script): user %s, team %s, route %s,\n' "$SMOKE_EMAIL" "$SMOKE_TEAM" "$ROUTE_ID"
 printf '  the DeliveryLog rows for requestIds %s / %s / %s, DlqItem %s,\n' "$SAVE_ID" "$TEST_REQ_ID" "$DLQ_REQ_ID" "$DLQ_ITEM_ID"
-printf '  and the webhook.site token %s (DELETE https://webhook.site/token/%s).\n' "$WH_TOKEN" "$WH_TOKEN"
+printf '  and BOTH webhook.site tokens (DELETE https://webhook.site/token/%s and /%s).\n' "$WH_TOKEN" "$WH_TOKEN_FAIL"
 printf '==============================================\n'
 exit 0
