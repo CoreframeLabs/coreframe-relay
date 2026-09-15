@@ -187,6 +187,18 @@ const FoundingAccessSection = () => (
           </li>
           <li>
             <span className="font-semibold text-landing-primary">
+              A payload between 64KB and 1 MiB, if it lands in the DLQ.
+            </span>{' '}
+            Delivery and retry work exactly like any smaller payload up to
+            that point. But the DLQ only retains a payload&apos;s body for
+            manual replay up to 64KB — a bigger one that ends up in the DLQ
+            is still logged (requestId, status, timestamps, headers) with
+            nothing hidden, it just has no body to re-send. The Retry button
+            is disabled on that row and says why, rather than offering a
+            retry that would silently fail.
+          </li>
+          <li>
+            <span className="font-semibold text-landing-primary">
               No billing, no metering, no caps.
             </span>{' '}
             Founding Access is free, full stop, until usage-based billing

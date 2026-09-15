@@ -126,7 +126,14 @@ const SECTIONS: LegalSection[] = [
       <>
         <strong className="text-landing-primary">A payload size limit applies.</strong>{' '}
         Incoming requests above a size cap (currently 1 MiB) are rejected at
-        the point of receipt and are not buffered.
+        the point of receipt and are not buffered. Separately, a smaller cap
+        (currently 64KB) applies to how much of a payload is retained for
+        dead-letter-queue (DLQ) replay: a payload between 64KB and 1 MiB is
+        accepted, delivered, and retried like any other, but if it ultimately
+        lands in the DLQ, its body is not stored and cannot be manually
+        retried from the product — the product tells you this at the point
+        you would otherwise click Retry, rather than offering a retry that
+        would silently fail.
       </>,
       <>
         <strong className="text-landing-primary">
@@ -134,15 +141,15 @@ const SECTIONS: LegalSection[] = [
           original request.
         </strong>{' '}
         When a request is manually retried from the DLQ, the Service
-        reconstructs and re-sends the payload to your destination, but it may
-        not always be able to preserve every original request header. In
-        particular, signature headers some senders use to authenticate a
-        webhook (for example a Stripe, GitHub or Shopify signing header) may
-        not be present on a DLQ retry, and a destination that verifies such a
-        header may reject the retried request. Where this limitation applies,
-        we say so in the product itself, at the point you initiate a retry.
-        Treat DLQ retry as a recovery aid, not as a substitute for fixing the
-        underlying delivery failure.
+        reconstructs and re-sends the payload to your destination, including
+        the original request headers — so a signature header some senders use
+        to authenticate a webhook (for example a Stripe, GitHub or Shopify
+        signing header) is replayed as it was originally sent. The one
+        exception is a DLQ item written before this header-replay capability
+        shipped (2026-08-20): those older rows have no stored headers to
+        replay, and the product states this per item, at the point you
+        initiate a retry. Treat DLQ retry as a recovery aid, not as a
+        substitute for fixing the underlying delivery failure.
       </>,
       'We do not support Meta/WhatsApp’s webhook verification handshake. Do not rely on the Service for Meta-originated webhook sources that require it.',
       'Support is provided by one person, on a reasonable-endeavours basis, with no committed response times or support hours.',
