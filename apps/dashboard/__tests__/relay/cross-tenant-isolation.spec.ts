@@ -239,6 +239,7 @@ describeIfConfigured('[cross-tenant isolation] every team-scoped Relay handler',
   // Handlers, loaded fresh AFTER DATABASE_URL is repointed at relay_app (see beforeAll).
   type Handler = (req: NextApiRequest, res: NextApiResponse) => Promise<void>;
   let routesIndex: Handler;
+  let routePatch: Handler;
   let destinationHeaders: Handler;
   let rotateToken: Handler;
   let testSend: Handler;
@@ -398,6 +399,8 @@ describeIfConfigured('[cross-tenant isolation] every team-scoped Relay handler',
 
       // eslint-disable-next-line @typescript-eslint/no-require-imports
       routesIndex = require('../../pages/api/teams/[slug]/relay/routes/index').default;
+      // eslint-disable-next-line @typescript-eslint/no-require-imports
+      routePatch = require('../../pages/api/teams/[slug]/relay/routes/[routeId]/index').default;
       destinationHeaders =
         // eslint-disable-next-line @typescript-eslint/no-require-imports
         require('../../pages/api/teams/[slug]/relay/routes/[routeId]/destination-headers').default;
@@ -505,6 +508,29 @@ describeIfConfigured('[cross-tenant isolation] every team-scoped Relay handler',
       // This is the write-safety proof, not just a status code: did the attacker's
       // request actually revoke the victim's live credential?
       expect(row?.ingestToken).toBe(ROUTE_B_TOKEN_BEFORE);
+    });
+  });
+
+  describe('routes/[routeId]/index.ts — PATCH on another team\'s routeId [RELAY-123]', () => {
+    it('404s and the victim route\'s destination/maxRetries/status are unchanged', async () => {
+      const req = makeRequest(
+        'PATCH',
+        { slug: TEAM_A_SLUG, routeId: ROUTE_B },
+        { destination: 'https://attacker-controlled.example.com/hook', maxRetries: 1, status: 'PAUSED' }
+      );
+      const res = makeResponse();
+      await routePatch(req, res);
+      expect(statusOf(res)).toBe(404);
+
+      // Read back as TEAM B's own scope — the attacker's PATCH must not have landed.
+      const row = await withTeamScope(TEAM_B_ID, () =>
+        scoped.route.findFirst({
+          where: { id: ROUTE_B },
+          select: { destination: true, maxRetries: true, status: true },
+        })
+      );
+      expect(row?.destination).toBe('https://b-victim.example.com/hook');
+      expect(row?.status).not.toBe('PAUSED');
     });
   });
 
@@ -682,6 +708,24 @@ describeIfConfigured('[cross-tenant isolation] every team-scoped Relay handler',
       expect(statusOf(res)).toBe(200);
       const ids = bodyOf<{ data: { items: Array<{ id: string }> } }>(res).data.items.map((i) => i.id);
       expect(ids).toContain(DLQ_A);
+    });
+
+    // [RELAY-123] Not gated by RELAY-84 -- this handler was built already wrapped in
+    // withTeamScope from day one (no legacy pre-wrap version exists), so this is
+    // expected GREEN today: proof the new endpoint's OWN team access actually works,
+    // not just that cross-team access is denied (the negative control above).
+    it('routes/[routeId]/index.ts PATCH still updates the caller\'s OWN route', async () => {
+      const req = makeRequest(
+        'PATCH',
+        { slug: TEAM_A_SLUG, routeId: ROUTE_A },
+        { maxRetries: 3 }
+      );
+      const res = makeResponse();
+      await routePatch(req, res);
+
+      expect(statusOf(res)).toBe(200);
+      expect(bodyOf<{ data: { id: string; maxRetries: number } }>(res).data.maxRetries).toBe(3);
+      expect(bodyOf<{ data: { id: string } }>(res).data.id).toBe(ROUTE_A);
     });
 
     // Expected GREEN today -- fetchRouteBySlugs resolves the Team row unscoped (Team

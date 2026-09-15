@@ -111,6 +111,7 @@ import * as deliveryModel from 'models/delivery';
 import dlqRetryHandler from '../../pages/api/teams/[slug]/relay/dlq/[id]/retry';
 import dlqIndexHandler from '../../pages/api/teams/[slug]/relay/dlq/index';
 import routesIndexHandler from '../../pages/api/teams/[slug]/relay/routes/index';
+import routePatchHandler from '../../pages/api/teams/[slug]/relay/routes/[routeId]/index';
 import rotateTokenHandler from '../../pages/api/teams/[slug]/relay/routes/[routeId]/rotate-token';
 import destinationHeadersHandler from '../../pages/api/teams/[slug]/relay/routes/[routeId]/destination-headers';
 import testSendHandler from '../../pages/api/teams/[slug]/relay/routes/[routeId]/test-send';
@@ -263,6 +264,34 @@ describe('routes/[routeId]/rotate-token.ts — POST (rotate a live ingest creden
 
     expect(statusOf(res)).toBe(SENTINEL_STATUS);
     expect(routeModel.rotateIngestToken).toHaveBeenCalledWith(TEAM_ID, ROUTE_ID);
+  });
+});
+
+describe('routes/[routeId]/index.ts — PATCH (edit destination/maxRetries/status) [RELAY-123]', () => {
+  const ROUTE_ID = 'route-1';
+  const PATCH_BODY = { destination: 'https://new-dest.example.com/hook' };
+
+  it('MEMBER: 403, and fetchRoute is never called', async () => {
+    setRole(Role.MEMBER);
+    const req = makeRequest('PATCH', { slug: TEAM_SLUG, routeId: ROUTE_ID }, PATCH_BODY);
+    const res = makeResponse();
+    await routePatchHandler(req, res);
+
+    expect(statusOf(res)).toBe(403);
+    expect(routeModel.fetchRoute).not.toHaveBeenCalled();
+    expect(routeModel.updateRoute).not.toHaveBeenCalled();
+  });
+
+  it('ADMIN: gate passes, fetchRoute IS called', async () => {
+    setRole(Role.ADMIN);
+    (routeModel.fetchRoute as jest.Mock).mockRejectedValue(new SentinelError());
+
+    const req = makeRequest('PATCH', { slug: TEAM_SLUG, routeId: ROUTE_ID }, PATCH_BODY);
+    const res = makeResponse();
+    await routePatchHandler(req, res);
+
+    expect(statusOf(res)).toBe(SENTINEL_STATUS);
+    expect(routeModel.fetchRoute).toHaveBeenCalledWith(TEAM_ID, ROUTE_ID);
   });
 });
 
