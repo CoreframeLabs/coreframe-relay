@@ -132,6 +132,12 @@ type LegalPageProps = {
   sections: LegalSection[];
   metaTitle: string;
   metaDescription: string;
+  /** Absolute, self-referencing canonical URL for this page — [seo-foundation
+   * 2026-09-15]. No canonical tag existed anywhere on the public site before
+   * this; passed explicitly per page rather than derived, since there is no
+   * shared base-URL constant read from a `<Head>`-safe (i.e. `NEXT_PUBLIC_`)
+   * env var in this codebase today. */
+  canonical: string;
 };
 
 const LegalPage = ({
@@ -142,12 +148,14 @@ const LegalPage = ({
   sections,
   metaTitle,
   metaDescription,
+  canonical,
 }: LegalPageProps) => {
   return (
     <>
       <Head>
         <title>{metaTitle}</title>
         <meta name="description" content={metaDescription} />
+        <link rel="canonical" href={canonical} />
       </Head>
 
       <div className="min-h-screen bg-landing-base text-landing-secondary antialiased">

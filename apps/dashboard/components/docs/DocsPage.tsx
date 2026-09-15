@@ -116,6 +116,9 @@ type DocsPageProps = {
   metaDescription: string;
   /** Rendered directly under the intro, before the section nav — used for a CTA row. */
   afterIntro?: ReactNode;
+  /** Absolute, self-referencing canonical URL — [seo-foundation 2026-09-15],
+   * same reasoning as `LegalPage`'s `canonical` prop. */
+  canonical: string;
 };
 
 const DocsPage = ({
@@ -127,12 +130,14 @@ const DocsPage = ({
   metaTitle,
   metaDescription,
   afterIntro,
+  canonical,
 }: DocsPageProps) => {
   return (
     <>
       <Head>
         <title>{metaTitle}</title>
         <meta name="description" content={metaDescription} />
+        <link rel="canonical" href={canonical} />
       </Head>
 
       <div className="min-h-screen bg-landing-base text-landing-secondary antialiased">

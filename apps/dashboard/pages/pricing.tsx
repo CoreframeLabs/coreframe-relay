@@ -127,6 +127,7 @@ const PricingPage: NextPageWithLayout = () => {
           name="description"
           content="Coreframe Relay's n8n Reliability tier: $19/month flat, no metering, no usage caps. Point a Relay route at your n8n Production Webhook URL and get retry-with-backoff plus a dead letter queue for anything n8n doesn't answer for."
         />
+        <link rel="canonical" href="https://relay.coreframe-labs.dev/pricing" />
       </Head>
       <div className="min-h-screen bg-landing-base text-landing-secondary antialiased">
         <PricingHeader />

@@ -136,6 +136,18 @@ const unAuthenticatedRoutes = [
   '/docs',
   '/docs/**',
   '/pricing',
+  // [seo-foundation 2026-09-15] `growth/product/relay-seo-content-strategy-
+  // 2026-09-15.md` §6 flagged robots.txt/sitemap.xml as unverified. Curled
+  // production directly: both files exist in `public/` but 307'd to
+  // `/auth/login` (200 HTML) before this entry, exactly the same failure
+  // mode RELAY-79/80/81/108 hit above — a file under `public/` is not
+  // enough, this allowlist is a *separate*, positive gate, and this
+  // matcher's config runs middleware on every path except
+  // `_next/static|_next/image|favicon.ico|api/auth/session`, which does not
+  // exempt `public/`-served static files. Named exactly, not by wildcard,
+  // same discipline as the rest of this list.
+  '/robots.txt',
+  '/sitemap.xml',
 ];
 
 /**

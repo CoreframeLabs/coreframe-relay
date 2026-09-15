@@ -54,6 +54,9 @@ const LandingPage: NextPageWithLayout = () => {
           name="description"
           content="Relay sits in front of your endpoint — including n8n's Production Webhook URL — counts every webhook the moment it lands, and re-sends the ones that fail. n8n Reliability tier: $19/month flat, no metering."
         />
+        {/* [seo-foundation 2026-09-15] No canonical tag existed on any public
+            page before this pass — see the commit message. */}
+        <link rel="canonical" href="https://relay.coreframe-labs.dev/" />
       </Head>
 
       {/* [ui-revamp Phase 1/4] The wrapper now consumes `--landing-*` tokens

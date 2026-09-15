@@ -46,6 +46,7 @@ const DocsIndexPage: NextPageWithLayout = () => (
     title="Coreframe Relay documentation"
     metaTitle="Documentation | Coreframe Relay"
     metaDescription="Setup guides for using Coreframe Relay in front of your webhook sources, starting with n8n."
+    canonical="https://relay.coreframe-labs.dev/docs"
     intro={
       <p>
         Guides for wiring Relay in front of the thing that actually sends or

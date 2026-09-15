@@ -46,6 +46,7 @@ const PrivacyPage: NextPageWithLayout = () => {
           name="description"
           content="How Coreframe Labs Ltd collects and processes personal data through Coreframe Relay, including as a data processor for webhook payloads."
         />
+        <link rel="canonical" href="https://relay.coreframe-labs.dev/privacy" />
       </Head>
 
       <LegalLayout title="Privacy Notice" effectiveDate={EFFECTIVE_DATE}>

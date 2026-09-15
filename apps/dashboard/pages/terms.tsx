@@ -379,6 +379,7 @@ const TermsPage: NextPageWithLayout = () => (
     lastUpdated="19 August 2026"
     metaTitle="Terms of Service — Coreframe Relay"
     metaDescription="The terms governing your use of Coreframe Relay, including what the Service does, what is not guaranteed, fees, acceptable use, and liability."
+    canonical="https://relay.coreframe-labs.dev/terms"
     intro={
       <p>
         This document governs your use of Coreframe Relay. It is written to

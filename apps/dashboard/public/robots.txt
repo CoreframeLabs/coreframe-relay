@@ -1,0 +1,12 @@
+User-agent: *
+Disallow: /auth/
+Disallow: /teams/
+Disallow: /settings/
+Disallow: /dashboard
+Disallow: /api/
+Disallow: /invitations/
+Disallow: /unlock-account
+Disallow: /login/saml
+Disallow: /.well-known/
+
+Sitemap: https://relay.coreframe-labs.dev/sitemap.xml
