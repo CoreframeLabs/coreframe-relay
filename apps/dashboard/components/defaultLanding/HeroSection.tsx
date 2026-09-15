@@ -94,11 +94,20 @@ const HeroSection = () => (
             nothing charged for general Founding Access — what isn't built yet
             lives in the Founding Access section below.
             [RELAY-108] £99/mo removed (see file header). The real, live, payable
-            price — $19/mo flat for the n8n-reliability tier — replaces it here. */}
+            price — $19/mo flat for the n8n-reliability tier — replaces it here.
+            [ux-walkthrough 2026-09-15, finding 2] "is live today" without a
+            qualifier oversold what a reader can actually do before clicking
+            through — this file's own header comment already called the tier
+            "live (Stripe test mode)" but that qualifier never made it into the
+            rendered copy, and /pricing's checkout button + /refund-policy both
+            needed a reader to click through to learn checkout is test-mode-only.
+            Added "(checkout is in Stripe test mode)" here directly so the claim
+            is accurate before the click, not just after it — same real price,
+            same real plan, just honest about what happens if you actually pay
+            right now. */}
         <p className="mx-auto mt-5 max-w-xl text-sm text-landing-muted">
           Free while we&apos;re onboarding the first teams — no card, nothing
-          charged. Fixing n8n webhook reliability specifically is live today
-          at{' '}
+          charged. Fixing n8n webhook reliability specifically is priced at{' '}
           <Link
             href="/pricing"
             /* Underline uses the muted token, not the border token: `--landing-border`
@@ -108,8 +117,9 @@ const HeroSection = () => (
             className={`rounded text-landing-secondary underline decoration-landing-muted underline-offset-4 transition-colors hover:text-landing-primary ${focusRing}`}
           >
             $19/mo flat, no metering
-          </Link>
-          . What Founding Access doesn&apos;t include yet is{' '}
+          </Link>{' '}
+          (checkout is in Stripe test mode today — a real card won&apos;t be
+          charged). What Founding Access doesn&apos;t include yet is{' '}
           <a
             href="#founding-access"
             className={`rounded text-landing-secondary underline decoration-landing-muted underline-offset-4 transition-colors hover:text-landing-primary ${focusRing}`}
