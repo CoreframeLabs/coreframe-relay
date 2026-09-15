@@ -148,6 +148,17 @@ const unAuthenticatedRoutes = [
   // same discipline as the rest of this list.
   '/robots.txt',
   '/sitemap.xml',
+  // [RELAY-129 regression fix, same-day] Adding an explicit '/' matcher entry
+  // (above) made middleware run on the landing page for the first time ever —
+  // previously it was public only by accident (the i18n-forced matcher regex
+  // never matched bare '/' at all, so the whole auth check was skipped, headers
+  // included). Now that middleware DOES run on '/', it falls into the same
+  // auth-redirect branch every other un-allowlisted path does, since '/' was
+  // never on this list — confirmed live: `curl -D-` on production showed '/'
+  // 307ing anonymous visitors to `/auth/login` immediately after the header fix
+  // deployed. The landing page must stay public; adding it here is what
+  // actually delivers that, now that the accidental bypass is gone.
+  '/',
 ];
 
 /**
