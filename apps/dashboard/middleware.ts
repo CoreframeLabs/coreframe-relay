@@ -285,5 +285,16 @@ export default async function middleware(req: NextRequest) {
 }
 
 export const config = {
-  matcher: ['/((?!_next/static|_next/image|favicon.ico|api/auth/session).*)'],
+  // [security-hardening 2026-09-15] `i18n` in next.config.js forces a mandatory
+  // locale segment into the compiled matcher regex, so the catch-all pattern below
+  // never fires on the bare root path `/` (it normalizes to `/en`, which satisfies
+  // the locale group but leaves nothing for the required trailing segment). That
+  // left `/` — the landing page every visitor hits first — shipping with ZERO
+  // security headers: no CSP, no Referrer-Policy, no Permissions-Policy, no
+  // Cross-Origin-*. Confirmed via `.next/server/middleware-manifest.json`'s own
+  // compiled regex and a live `curl -D-` diff against `/pricing` (which does match
+  // and does get every header). `/` is public by accident of this regex, not by
+  // being on `unAuthenticatedRoutes` — it was never on that list at all — so this
+  // is purely a header-coverage fix, not a change to who can reach `/` anonymously.
+  matcher: ['/', '/((?!_next/static|_next/image|favicon.ico|api/auth/session).*)'],
 };
