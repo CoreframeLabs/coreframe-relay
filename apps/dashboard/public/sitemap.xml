@@ -1,0 +1,27 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">
+  <url>
+    <loc>https://relay.coreframe-labs.dev/</loc>
+  </url>
+  <url>
+    <loc>https://relay.coreframe-labs.dev/pricing</loc>
+  </url>
+  <url>
+    <loc>https://relay.coreframe-labs.dev/docs</loc>
+  </url>
+  <url>
+    <loc>https://relay.coreframe-labs.dev/docs/integrations/n8n</loc>
+  </url>
+  <url>
+    <loc>https://relay.coreframe-labs.dev/terms</loc>
+  </url>
+  <url>
+    <loc>https://relay.coreframe-labs.dev/refund-policy</loc>
+  </url>
+  <url>
+    <loc>https://relay.coreframe-labs.dev/privacy</loc>
+  </url>
+  <url>
+    <loc>https://relay.coreframe-labs.dev/dpa</loc>
+  </url>
+</urlset>

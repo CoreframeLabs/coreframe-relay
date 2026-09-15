@@ -50,6 +50,7 @@ const DpaPage: NextPageWithLayout = () => {
           name="description"
           content="The Art. 28 UK GDPR contract governing how Coreframe Labs Ltd processes personal data flowing through a customer's webhook payloads."
         />
+        <link rel="canonical" href="https://relay.coreframe-labs.dev/dpa" />
       </Head>
 
       <LegalLayout

@@ -434,6 +434,7 @@ const N8nDocsPage: NextPageWithLayout = () => (
     title="Using Relay in front of an n8n webhook"
     metaTitle="n8n webhook reliability — setup guide | Coreframe Relay"
     metaDescription="n8n's Webhook trigger has documented, current reliability bugs — webhooks that silently stop firing, an API-activation bug, a 100-second Cloudflare timeout, and a Production Webhook that can return 200 with nothing registered. Here's what putting Relay in front of it actually changes, sourced and stated plainly."
+    canonical="https://relay.coreframe-labs.dev/docs/integrations/n8n"
     intro={
       <p>
         If you found this page from an n8n bug thread or the community

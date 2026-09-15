@@ -118,6 +118,7 @@ const RefundPolicyPage: NextPageWithLayout = () => (
     lastUpdated="19 August 2026"
     metaTitle="Refund and Cancellation Policy — Coreframe Relay"
     metaDescription="How billing, cancellation and refunds work for Coreframe Relay's flat monthly subscription."
+    canonical="https://relay.coreframe-labs.dev/refund-policy"
     sections={SECTIONS}
   />
 );
