@@ -68,9 +68,54 @@ export const getByCustomerId = async (
   });
 };
 
-export const getTeam = async (key: { id: string } | { slug: string }) => {
+/**
+ * [RELAY-127] The team fields ANY caller of `getTeam` is allowed to see. Every
+ * real call site was audited before writing this list (grep `getTeam(` across
+ * the codebase):
+ *
+ *   - `lib/nextAuth.ts`'s `linkToTeam` reads `defaultRole`
+ *   - `lib/relay/dlqNotify.ts`'s `notifyDlqFallback` reads `slackWebhookUrl`
+ *     (the DLQ Slack-vs-email gate — NOT dead code, even though the column is
+ *     NULL for every team today; see the column's own schema comment)
+ *   - `pages/api/auth/join.ts` reads `name` (for a Slack notification)
+ *   - `pages/api/auth/sso/verify.ts` reads `id`
+ *   - `pages/api/teams/[slug]/index.ts`'s GET handler returns the WHOLE object
+ *     as the `/api/teams/:slug` API response, consumed client-side by
+ *     `hooks/useTeam.ts`; every component downstream of that hook
+ *     (`TeamSettings`, `TeamTab`, `RemoveTeam`, `Members`,
+ *     `PendingInvitations`, `APIKeys`, `LinkToPortal`, `N8nWedgePaymentLink`,
+ *     directory-sync/sso page URLs) uses only `id`, `name`, `slug`, `domain`
+ *   - `pages/api/webhooks/stripe.ts` reads `slug`
+ *
+ * Deliberately excluded: `billingId`, `billingProvider`, `plan`,
+ * `attributionSource`/`Medium`/`Campaign`, `isInternal`, `createdAt`,
+ * `updatedAt` — no real caller of THIS function touches any of them (the
+ * billing pages read `plan`/`billingId` off `teamMember.team` via
+ * `getTeamMember`'s own `include`, a separate path this ticket does not
+ * touch). This is the same "named, exported select" convention
+ * `models/route.ts`'s `PUBLIC_ROUTE_SELECT` already uses — see its comment for
+ * the rationale.
+ */
+export const TEAM_SELECT = {
+  id: true,
+  name: true,
+  slug: true,
+  domain: true,
+  defaultRole: true,
+  slackWebhookUrl: true,
+} as const;
+
+export type PublicTeam = Pick<
+  Team,
+  'id' | 'name' | 'slug' | 'domain' | 'defaultRole' | 'slackWebhookUrl'
+>;
+
+export const getTeam = async (
+  key: { id: string } | { slug: string }
+): Promise<PublicTeam> => {
   return await prisma.team.findUniqueOrThrow({
     where: key,
+    select: TEAM_SELECT,
   });
 };
 

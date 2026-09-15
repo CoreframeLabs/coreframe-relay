@@ -65,13 +65,47 @@ function digestToken(token: string): string {
   return createHash('sha256').update(token, 'utf8').digest('hex');
 }
 
-/** Read the raw request body without letting Next parse it first. */
-async function readRawBody(readable: Readable): Promise<string> {
+/**
+ * Read the raw request body without letting Next parse it first, refusing to
+ * hold more than `limit` bytes in memory.
+ *
+ * [RELAY-127] Matches `apps/proxy/src/routes/ingest.ts`'s `readBodyWithLimit`:
+ * bytes are counted AS THEY ARRIVE and the read is abandoned the moment the
+ * running total exceeds the cap, instead of buffering the full body and
+ * truncating afterward — the previous version here had already paid the
+ * memory cost of an oversized body by the time it decided to discard the
+ * excess. The output is still truncated to `limit` bytes (never grown to it
+ * from a short body), preserving the existing "…[truncated]" behavior for
+ * anything over `MAX_BODY_BYTES`.
+ */
+async function readRawBody(
+  readable: Readable,
+  limit: number
+): Promise<{ body: string; truncated: boolean }> {
   const chunks: Buffer[] = [];
+  let total = 0;
+  let truncated = false;
+
   for await (const chunk of readable) {
-    chunks.push(typeof chunk === 'string' ? Buffer.from(chunk) : chunk);
+    if (truncated) continue;
+
+    const buf = typeof chunk === 'string' ? Buffer.from(chunk) : chunk;
+    total += buf.byteLength;
+
+    if (total > limit) {
+      // Keep only up to `limit` bytes of what has arrived so far, then stop
+      // accumulating — later chunks are drained (the `continue` above) but
+      // never buffered, so a large body never grows this array past the cap.
+      const room = limit - (total - buf.byteLength);
+      if (room > 0) chunks.push(buf.subarray(0, room));
+      truncated = true;
+      continue;
+    }
+
+    chunks.push(buf);
   }
-  return Buffer.concat(chunks).toString('utf8');
+
+  return { body: Buffer.concat(chunks).toString('utf8'), truncated };
 }
 
 /** The exported helper lives in `lib/relay/catcherTokens.ts`; re-exports route handlers
@@ -111,11 +145,8 @@ export default async function handler(
     return res.status(405).json({ error: 'bad_request' });
   }
 
-  const rawBody = await readRawBody(req);
-  const body =
-    rawBody.length > MAX_BODY_BYTES
-      ? rawBody.slice(0, MAX_BODY_BYTES) + '…[truncated]'
-      : rawBody;
+  const { body: rawBody, truncated } = await readRawBody(req, MAX_BODY_BYTES);
+  const body = truncated ? rawBody + '…[truncated]' : rawBody;
 
   const entry = {
     at: new Date().toISOString(),
