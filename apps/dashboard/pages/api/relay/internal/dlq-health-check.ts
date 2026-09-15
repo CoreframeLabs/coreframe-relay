@@ -8,6 +8,7 @@ import {
   evaluateDlqHealth,
   DLQ_GROWTH_ALERT_THRESHOLD,
 } from '@/lib/relay/dlqHealthCheck';
+import { notifyDlqGrowthThreshold } from '@/lib/relay/dlqNotify';
 
 /**
  * GET /api/relay/internal/dlq-health-check   — [RELAY-44]
@@ -36,6 +37,18 @@ import {
  * for `route-lookup` and `qstash`. Without that entry, Vercel's cron request (no NextAuth
  * session) gets 307-redirected to `/auth/login` before this handler — or its bearer
  * check — ever runs, and the cron "succeeds" against an HTML login page every time.
+ *
+ * CUSTOMER-FACING GROWTH ALERTING PIGGYBACKS ON THIS SAME CRON [RELAY-124]
+ * --------------------------------------------------------------------------
+ * The founder-only alert above is global (`unscopedPrisma`-wide counts, no team
+ * scoping — see dlqHealthCheck.ts's module doc for why). RELAY-124 is the same idea
+ * per customer route, so it deliberately reuses this cron's existing schedule rather
+ * than registering a second `vercel.json` entry: one more step in the same handler,
+ * `notifyDlqGrowthThreshold` per route (`lib/relay/dlqNotify.ts`), which calls the
+ * exact same `evaluateDlqHealth` function above — just fed per-route counts instead of
+ * global ones. Known limitation, acceptable at current scale: this is one query set
+ * per route per invocation (no batching), same N+1 shape RELAY-44 accepted for the
+ * global case being turned into N cases here.
  *
  * SENTRY SEVERITY — FLAGGED, NOT PROVEN
  * ----------------------------------------
@@ -107,12 +120,30 @@ export default async function handler(
       }
     }
 
+    // [RELAY-124] Customer-facing per-route growth alerting — see module doc above.
+    // Independent of the global `result` above: a route can cross its own growth
+    // threshold while the deployment-wide counts still look healthy, and vice versa.
+    const routes = await unscopedPrisma.route.findMany({
+      select: { id: true, teamId: true },
+    });
+
+    const growthNotifications = await Promise.allSettled(
+      routes.map((route) =>
+        notifyDlqGrowthThreshold({ teamId: route.teamId, routeId: route.id })
+      )
+    );
+    const routesNotified = growthNotifications.filter(
+      (settled) => settled.status === 'fulfilled' && settled.value.notified
+    ).length;
+
     res.setHeader('Cache-Control', 'no-store');
     return res.status(200).json({
       healthy: result.healthy,
       reasons: result.reasons,
       metrics: result.metrics,
       failureRatio: result.failureRatio,
+      routesChecked: routes.length,
+      routesNotified,
     });
   } catch (error) {
     console.error('[relay] dlq-health-check failed', {
