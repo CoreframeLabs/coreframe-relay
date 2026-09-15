@@ -284,6 +284,19 @@ const GapSection = () => {
           </div>
         </Pane>
       </div>
+
+      {/* [ux-walkthrough 2026-09-15, finding 4] A persona walkthrough flagged that this
+          replay loops forever with no "this is an example" label, while ProofSection's
+          receipt strip directly below it — the same fabricated-request-ID/status-code
+          idiom — does carry one (`An example of the receipt's format, not a record of
+          real traffic.`). Read together, an unlabelled loop next to a labelled one-shot
+          reads as an inconsistency in the footer's own "no invented numbers" claim, even
+          though the loop was never meant to imply a live feed. Same wording pattern as
+          ProofSection's figcaption, same `text-landing-muted` token this page already
+          uses for its captions elsewhere. */}
+      <p className="relay-reveal mt-4 text-center text-xs text-landing-muted">
+        A replayed example of the request/retry shape, not a live feed.
+      </p>
     </div>
   );
 };
