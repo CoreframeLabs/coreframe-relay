@@ -1,4 +1,4 @@
-import type { Page } from '@playwright/test';
+import type { Locator, Page } from '@playwright/test';
 import { expect } from '@playwright/test';
 
 /**
@@ -108,6 +108,53 @@ export class RoutesPage {
     );
     await this.page.getByRole('button', { name: 'Send to destination' }).click();
     return testSendResponse;
+  }
+
+  /**
+   * [RELAY-128] Opens the row's "Edit destination" dialog (`EditDestinationDialog.tsx`)
+   * and returns a `Locator` scoped to it. Scoping matters here specifically: the
+   * dialog's own status toggle buttons are labelled "Active"/"Paused" — the EXACT
+   * same accessible names `BufferRoutes.tsx`'s always-mounted filter bar already
+   * uses for its own buttons. `page.getByRole('button', { name: 'Active' })` with no
+   * scope would hit Playwright's strict-mode ambiguity error the moment the dialog is
+   * open; every interaction below goes through this scoped `Locator`, never `this.page`
+   * directly, for that reason.
+   */
+  async openEditDestination(routeName: string): Promise<Locator> {
+    const row = this.rowFor(routeName);
+    await row.getByRole('button', { name: `Edit destination for ${routeName}` }).click();
+    const dialog = this.page.getByRole('dialog', { name: 'Edit destination' });
+    await expect(dialog).toBeVisible();
+    return dialog;
+  }
+
+  /**
+   * Fills whichever fields are given and clicks "Save changes", returning the raw
+   * PATCH response so the caller asserts on what the endpoint actually answered
+   * (200 with the persisted row, or a real 422 with its own rejection reason) rather
+   * than assuming success.
+   */
+  async submitEditDestination(
+    dialog: Locator,
+    params: { destination?: string; maxRetries?: number; status?: 'ACTIVE' | 'PAUSED' }
+  ) {
+    if (params.destination !== undefined) {
+      await dialog.getByLabel('Destination URL').fill(params.destination);
+    }
+    if (params.maxRetries !== undefined) {
+      await dialog.getByLabel('Max retries').fill(String(params.maxRetries));
+    }
+    if (params.status !== undefined) {
+      await dialog
+        .getByRole('button', { name: params.status === 'ACTIVE' ? 'Active' : 'Paused' })
+        .click();
+    }
+
+    const patchResponse = this.page.waitForResponse(
+      (r) => /\/relay\/routes\/[^/]+$/.test(r.url()) && r.request().method() === 'PATCH'
+    );
+    await dialog.getByRole('button', { name: 'Save changes' }).click();
+    return patchResponse;
   }
 }
 
