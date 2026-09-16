@@ -2,6 +2,23 @@ import { Role } from '@prisma/client';
 import { ApiError } from './errors';
 import { getTeamMember } from 'models/team';
 
+// [RELAY-159] Admin can't make anyone an Owner. This rule was previously inline
+// inside validateMembershipOperation below (the members PATCH path only), but the
+// same rule applies wherever a role is granted -- including
+// pages/api/teams/[slug]/invitations.ts POST, which grants a role to a brand new
+// invitation with no existing TeamMember row to look up (so
+// validateMembershipOperation itself, which requires a memberId, doesn't fit).
+// Extracted so both call sites enforce the identical check and throw the identical
+// message instead of the invitation path reimplementing it.
+export function assertCanAssignRole(callerRole: Role, targetRole?: Role) {
+  if (callerRole === Role.ADMIN && targetRole === Role.OWNER) {
+    throw new ApiError(
+      403,
+      'You do not have permission to update the role of this member to Owner.'
+    );
+  }
+}
+
 export async function validateMembershipOperation(
   memberId: string,
   teamMember,
@@ -44,12 +61,7 @@ export async function validateMembershipOperation(
   }
 
   // Admin can't make anyone an Owner
-  if (teamMember.role === Role.ADMIN && operationMeta?.role === Role.OWNER) {
-    throw new ApiError(
-      403,
-      'You do not have permission to update the role of this member to Owner.'
-    );
-  }
+  assertCanAssignRole(teamMember.role, operationMeta?.role);
 
   // Member can't make anyone an Admin or Owner
   if (
