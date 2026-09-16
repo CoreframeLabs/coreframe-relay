@@ -133,6 +133,12 @@ const unAuthenticatedRoutes = [
   // /dpa did. `/docs/**` covers `/docs/integrations/n8n` and any future nested docs
   // page without a second entry per page — `/docs` itself still needs its own exact
   // entry because micromatch's `**` does not match a zero-segment remainder.
+  // [ux-walkthrough 2026-09-15, finding 5b] `/docs/quickstart` added as a page; no
+  // new entry needed here — checked, not assumed: `micromatch.isMatch('/docs/
+  // quickstart', ['/docs', '/docs/**'])` → true, and the built page curls 200
+  // anonymously (see that commit). Docs pages are the one place a wildcard is the
+  // right call: every file under `pages/docs/` is public by definition, unlike
+  // `/api/relay/internal/*` above where a new file must opt in explicitly.
   '/docs',
   '/docs/**',
   '/pricing',

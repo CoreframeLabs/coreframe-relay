@@ -70,8 +70,11 @@ const PricingHeader = () => (
       </Link>
       <ul className="ml-auto flex items-center gap-5">
         <li>
+          {/* [ux-walkthrough 2026-09-15, finding 5b] `/docs` index, not the n8n
+              guide directly — same reasoning as LandingNav.tsx. The n8n guide is
+              still linked by name from this page's own intro paragraph below. */}
           <Link
-            href="/docs/integrations/n8n"
+            href="/docs"
             className={`rounded text-sm text-landing-secondary transition-colors hover:text-landing-primary ${focusRing}`}
           >
             Docs

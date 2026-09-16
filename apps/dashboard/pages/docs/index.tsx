@@ -7,6 +7,15 @@
  * alone, but a bare `/docs` that itself redirects to login would still be a dead end
  * for anyone who trims the URL back or follows a bare `/docs` link, so this is a real,
  * if currently one-entry, index rather than a redirect.
+ *
+ * [ux-walkthrough 2026-09-15, finding 5b] No longer one entry. `growth/product/
+ * relay-ux-walkthrough-2026-09-15.md` (Dana, fold 10) found that a technical evaluator
+ * who clicked Docs landed on "a single page about someone else's product" and read
+ * that as a maturity signal. There is now a general quickstart (`/docs/quickstart`)
+ * listed first, under its own "Getting started" heading, with the n8n guide kept
+ * under Integrations. The landing nav/footer and the pricing header's "Docs" links
+ * now point here rather than straight at the n8n page, so this index is the page a
+ * "Docs" click actually reaches.
  */
 import type { GetStaticPropsContext } from 'next';
 import { serverSideTranslations } from 'next-i18next/serverSideTranslations';
@@ -18,6 +27,27 @@ import type { DocsSection } from '@/components/docs/DocsPage';
 import type { NextPageWithLayout } from 'types';
 
 const sections: DocsSection[] = [
+  {
+    id: 'getting-started',
+    title: 'Getting started',
+    body: (
+      <ul className="list-disc space-y-2 pl-5">
+        <li>
+          <Link
+            href="/docs/quickstart"
+            className={`rounded text-landing-accent-text underline underline-offset-2 hover:text-landing-accent-text-hover ${focusRing}`}
+          >
+            Quickstart — any webhook sender
+          </Link>{' '}
+          <span className="text-landing-secondary">
+            — sign up, create a route, get the ingest URL, point your sender at
+            it; then what the delivery log shows and the limits to know before
+            relying on it.
+          </span>
+        </li>
+      </ul>
+    ),
+  },
   {
     id: 'integrations',
     title: 'Integrations',
@@ -45,12 +75,13 @@ const DocsIndexPage: NextPageWithLayout = () => (
     eyebrow="Docs"
     title="Coreframe Relay documentation"
     metaTitle="Documentation | Coreframe Relay"
-    metaDescription="Setup guides for using Coreframe Relay in front of your webhook sources, starting with n8n."
+    metaDescription="Setup guides for using Coreframe Relay in front of your webhook sources: a general quickstart for any sender, and an n8n-specific guide."
     canonical="https://relay.coreframe-labs.dev/docs"
     intro={
       <p>
         Guides for wiring Relay in front of the thing that actually sends or
-        receives your webhooks. Start with the integration you use.
+        receives your webhooks. The quickstart covers any sender; the
+        integration guides cover what is specific to one.
       </p>
     }
     sections={sections}

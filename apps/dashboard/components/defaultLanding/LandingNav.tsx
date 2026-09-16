@@ -60,8 +60,13 @@ const navLinks = [
 // `next/link` for client-side routing to an actual page. Per
 // `relay-gtm-readiness-audit-2026-08-21.md` §3.2, `/pricing` needs to be
 // reachable in 1-2 clicks from `/`; the nav is the shortest path (1 click).
+// [ux-walkthrough 2026-09-15, finding 5b] "Docs" now goes to the `/docs` index,
+// not straight to the n8n guide: the index lists the general quickstart first
+// and the n8n guide under Integrations, so a non-n8n visitor no longer lands on
+// "a single page about someone else's product" (Dana, fold 10). The n8n guide
+// keeps its own direct entry points — the hero's n8n button and the n8n section.
 const pageLinks = [
-  { href: '/docs/integrations/n8n', label: 'Docs' },
+  { href: '/docs', label: 'Docs' },
   { href: '/pricing', label: 'Pricing' },
 ];
 
