@@ -68,4 +68,8 @@ if [[ "$host" != "127.0.0.1" && "$host" != "localhost" ]]; then
 fi
 
 npx prisma generate
+# [RELAY-145] Refresh public/docs/**/*.md mirrors from their source-of-truth files
+# before the static build picks up public/ — see sync-doc-mirrors.mjs's own header
+# for why this is a copy, not a second hand-transcription.
+node scripts/sync-doc-mirrors.mjs
 npx next build
