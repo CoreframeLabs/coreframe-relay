@@ -24,9 +24,11 @@ test.describe('landing, pricing and docs — cold visitor', () => {
     ).toBeVisible();
 
     // The nav's real routed links (not in-page anchors) — LandingNav.tsx's `pageLinks`.
+    // [ux-walkthrough 2026-09-15, finding 5b] Docs → the `/docs` index now, not the
+    // n8n guide directly.
     await expect(
       page.getByRole('navigation', { name: 'Primary' }).getByRole('link', { name: 'Docs' })
-    ).toHaveAttribute('href', '/docs/integrations/n8n');
+    ).toHaveAttribute('href', '/docs');
     await expect(
       page.getByRole('navigation', { name: 'Primary' }).getByRole('link', { name: 'Pricing' })
     ).toHaveAttribute('href', '/pricing');
@@ -36,6 +38,29 @@ test.describe('landing, pricing and docs — cold visitor', () => {
     await expect(
       page.getByRole('link', { name: 'Request Founding Access' }).first()
     ).toHaveAttribute('href', '/auth/join');
+
+    // [ux-walkthrough 2026-09-15, finding 5a] The hero's second button is the n8n
+    // fast path — HeroSection.tsx. String copied from that file.
+    await expect(
+      page.getByRole('link', { name: 'Using n8n? Start with the n8n guide' })
+    ).toHaveAttribute('href', '/docs/integrations/n8n');
+  });
+
+  test('docs index lists the general quickstart, and the quickstart is reachable', async ({
+    page,
+  }) => {
+    // [ux-walkthrough 2026-09-15, finding 5b] — pages/docs/index.tsx + quickstart.tsx.
+    const index = await page.goto('/docs');
+    expect(index?.ok(), 'docs index must respond 2xx').toBeTruthy();
+    await expect(
+      page.getByRole('link', { name: 'Quickstart — any webhook sender' })
+    ).toHaveAttribute('href', '/docs/quickstart');
+
+    const quickstart = await page.goto('/docs/quickstart');
+    expect(quickstart?.ok(), 'quickstart must respond 2xx anonymously').toBeTruthy();
+    await expect(
+      page.getByRole('heading', { name: 'Put Relay in front of any webhook endpoint' })
+    ).toBeVisible();
   });
 
   test('pricing page shows the real $19/month tier and a working Stripe link', async ({

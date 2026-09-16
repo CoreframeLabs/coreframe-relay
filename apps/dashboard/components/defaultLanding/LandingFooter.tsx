@@ -70,9 +70,11 @@ const LandingFooter = () => (
               Founding Access
             </a>
             {/* [RELAY-108] Docs and Pricing — the two real routes this ticket
-                added, linked from the one footer that reaches every page. */}
+                added, linked from the one footer that reaches every page.
+                [ux-walkthrough 2026-09-15, finding 5b] Docs → the `/docs` index
+                (quickstart + n8n guide), same reasoning as LandingNav.tsx. */}
             <Link
-              href="/docs/integrations/n8n"
+              href="/docs"
               className={`rounded text-sm text-[#9a9ea8] transition-colors hover:text-zinc-100 ${focusRing}`}
             >
               Docs

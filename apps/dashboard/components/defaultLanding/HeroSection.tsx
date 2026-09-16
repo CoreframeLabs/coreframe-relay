@@ -30,6 +30,28 @@
  * on this page (`relay-gtm-readiness-audit-2026-08-21.md` §3.1: "£99/mo appears
  * nowhere a visitor can see it… the decided price is invisible"). £99/mo is gone;
  * the line now names the real, payable price and links to `/pricing`.
+ *
+ * [ux-walkthrough 2026-09-15, finding 5] The CTA pair is now split by intent. Before
+ * this, the only n8n-specific path on the first screen was a text link buried in the
+ * sub-line, and the secondary button — "Talk to us before you connect anything", a
+ * mailto — read as a sales call to a self-serve audience (`growth/product/
+ * relay-ux-walkthrough-2026-09-15.md`, Marco fold 1 + fix #5). An n8n visitor had to
+ * scroll to fold 5 to find anything addressed to them. The secondary button is now
+ * "Using n8n? Start with the n8n guide" → `/docs/integrations/n8n`, which is the page
+ * that already carries the four cited n8n bugs, the honest fixed/not-fixed table, the
+ * step-by-step setup AND the "Get n8n Reliability — $19/mo" button in its `afterIntro`.
+ *
+ * Deliberately NOT the walkthrough's literal suggestion of a "$19/mo" buy button up
+ * here. Checkout is still in Stripe test mode (director-only to flip; see the
+ * `[RELAY-108]` note above and the sub-line's own disclosure), so a first-screen
+ * button whose destination declines a real card would recreate the exact fold-1 →
+ * /pricing dead end the same walkthrough calls "the conversion killer". Routing to the
+ * guide first is one click faster than today for the n8n visitor, keeps the price one
+ * click further along on a page that states the test-mode caveat next to it, and
+ * doesn't need the checkout to change. If/when Stripe goes live, swapping this href to
+ * `/pricing` is a one-line change. The mailto didn't go away — it moved into the
+ * sub-line as a plain link, so "ask a human first" is still reachable without being
+ * one of the two buttons.
  */
 import Link from 'next/link';
 
@@ -81,11 +103,15 @@ const HeroSection = () => (
           spell is never a silent loss.
         </p>
 
-        {/* CTAs stack full-width at 360px (contract §5). */}
+        {/* CTAs stack full-width at 360px (contract §5).
+            [ux-walkthrough 2026-09-15, finding 5] One button per intent — general
+            (free Founding Access) and n8n (the guide, which carries the $19/mo
+            button itself). See the file header for why the n8n button goes to the
+            guide rather than straight to /pricing. */}
         <div className="mt-9 flex flex-col items-stretch justify-center gap-3 sm:flex-row sm:items-center">
           <LandingLink href="/auth/join">Request Founding Access</LandingLink>
-          <LandingLink href="mailto:info@coreframe-labs.dev" variant="secondary">
-            Talk to us before you connect anything
+          <LandingLink href="/docs/integrations/n8n" variant="secondary">
+            Using n8n? Start with the n8n guide
           </LandingLink>
         </div>
 
@@ -125,6 +151,16 @@ const HeroSection = () => (
             className={`rounded text-landing-secondary underline decoration-landing-muted underline-offset-4 transition-colors hover:text-landing-primary ${focusRing}`}
           >
             written down further down this page
+          </a>
+          .{' '}
+          {/* [ux-walkthrough 2026-09-15, finding 5] The old secondary button's
+              mailto, demoted to a text link — see the file header. */}
+          Rather ask a question before you connect anything?{' '}
+          <a
+            href="mailto:info@coreframe-labs.dev"
+            className={`rounded text-landing-secondary underline decoration-landing-muted underline-offset-4 transition-colors hover:text-landing-primary ${focusRing}`}
+          >
+            Email us
           </a>
           .
         </p>
