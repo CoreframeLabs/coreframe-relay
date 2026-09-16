@@ -1,0 +1,33 @@
+# Coreframe Relay
+
+> Relay sits in front of your webhook endpoint — including n8n's Production Webhook URL — counts every webhook the moment it lands, and re-sends the ones that fail.
+
+Relay is a webhook reliability buffer, not a workflow platform: point a route
+at your existing endpoint and Relay queues every request durably, retries
+failed forwards with backoff, and holds anything that never succeeds in a
+dead letter queue instead of letting it vanish. Delivery is at-least-once,
+not exactly-once, and there is no uptime SLA, status page, or service-credit
+scheme today — the Service is offered on a reasonable-endeavours basis by a
+very small team (Terms §3). Relay is n8n-first today: the n8n Reliability
+tier is $19/mo flat, no metering, checkout currently in Stripe test mode (a
+real card is declined). There are no paying customers yet, so this site
+carries no logos, testimonials, or invented numbers — a fabricated proof
+point is worse than an empty section.
+
+## Product
+
+- [Coreframe Relay](https://relay.coreframe-labs.dev/): Webhook receipt, retry-with-backoff, and a dead letter queue in front of your existing endpoint. Buffer phase only — no metrics, customer logos, or testimonials, because there are no customers yet.
+- [Pricing](https://relay.coreframe-labs.dev/pricing): n8n Reliability — $19/month flat, no metering, no usage caps, no trial clock. Checkout is a live Stripe Payment Link currently running in Stripe test mode.
+
+## Docs
+
+- [Documentation index](https://relay.coreframe-labs.dev/docs): Setup guides for wiring Relay in front of the thing that actually sends or receives your webhooks.
+- [Quickstart — any webhook sender](https://relay.coreframe-labs.dev/docs/quickstart): Sign up, create a route, get the ingest URL, point any webhook sender at it, then what the delivery log shows and the limits (1 MiB payload cap, 64KB DLQ-replay cap, no SLA) before you rely on it. Markdown mirror: https://relay.coreframe-labs.dev/docs/quickstart.md
+- [Using Relay in front of an n8n webhook](https://relay.coreframe-labs.dev/docs/integrations/n8n): The documented, current n8n Webhook-trigger bugs (silent stop, API-activation not registering the webhook path, the 100-second Cloudflare timeout, a Production Webhook that can return 200 with nothing registered), stated plainly against what Relay does and does not fix for each, plus step-by-step setup. Markdown mirror: https://relay.coreframe-labs.dev/docs/integrations/n8n.md
+
+## Legal
+
+- [Terms of Service](https://relay.coreframe-labs.dev/terms): Includes §3, "What is not guaranteed" — no uptime SLA and at-least-once (not exactly-once) delivery, stated explicitly.
+- [Privacy Notice](https://relay.coreframe-labs.dev/privacy)
+- [Data Processing Addendum](https://relay.coreframe-labs.dev/dpa)
+- [Refund / Cancellation Policy](https://relay.coreframe-labs.dev/refund-policy)

@@ -154,6 +154,19 @@ const unAuthenticatedRoutes = [
   // same discipline as the rest of this list.
   '/robots.txt',
   '/sitemap.xml',
+  // [RELAY-145] Same failure mode as robots.txt/sitemap.xml above: `llms.txt` and
+  // the two `.md` mirrors are real files under `public/`, but this allowlist is a
+  // *separate*, positive gate and the matcher's config does not exempt
+  // `public/`-served static files, so an unauthenticated visitor (or an AI
+  // crawler, which is the entire point of these files) 307'd to `/auth/login`
+  // before this entry was added — confirmed live 2026-09-16:
+  // `https://relay.coreframe-labs.dev/llms.txt` returned a 307. Named exactly,
+  // not by wildcard, same discipline as the rest of this list: `/docs/**`
+  // already covers page routes, but these are `public/` files served from a
+  // sibling path, not pages, so each needs its own entry.
+  '/llms.txt',
+  '/docs/quickstart.md',
+  '/docs/integrations/n8n.md',
   // [RELAY-129 regression fix, same-day] Adding an explicit '/' matcher entry
   // (above) made middleware run on the landing page for the first time ever —
   // previously it was public only by accident (the i18n-forced matcher regex
