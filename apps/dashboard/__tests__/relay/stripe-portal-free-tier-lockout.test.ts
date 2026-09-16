@@ -39,7 +39,9 @@ jest.mock('lib/stripe', () => ({
 }));
 jest.mock('lib/env', () => ({
   __esModule: true,
-  default: { appUrl: 'http://localhost:4002' },
+  // [RELAY-125] the handler now checks the payments feature flag server-side, like
+  // every other feature-flagged handler already did.
+  default: { appUrl: 'http://localhost:4002', teamFeatures: { payments: true } },
 }));
 
 import handler from 'pages/api/teams/[slug]/payments/create-portal-link';
@@ -59,6 +61,9 @@ describe('[create-portal-link] AC5 — Free-tier team locked out of the Customer
 
   it('403s a team with no billingId at all — never mints a blank Stripe customer just to open a portal', async () => {
     mockThrowIfNoTeamAccess.mockResolvedValue({
+      // [RELAY-125] the role gate runs before the lockout; OWNER is the role that
+      // reaches it, so these fixtures now say so explicitly.
+      role: 'OWNER',
       team: { slug: 'free-team', billingId: null },
     });
     mockGetSession.mockResolvedValue({ user: { email: 'owner@example.com' } });
@@ -76,6 +81,9 @@ describe('[create-portal-link] AC5 — Free-tier team locked out of the Customer
 
   it('403s a team with a billingId but no active subscription (e.g. cancelled) — checked against the real Subscription table, not the cached billingId alone', async () => {
     mockThrowIfNoTeamAccess.mockResolvedValue({
+      // [RELAY-125] the role gate runs before the lockout; OWNER is the role that
+      // reaches it, so these fixtures now say so explicitly.
+      role: 'OWNER',
       team: { slug: 'lapsed-team', billingId: 'cus_lapsed' },
     });
     mockGetSession.mockResolvedValue({ user: { email: 'owner@example.com' } });
@@ -93,6 +101,9 @@ describe('[create-portal-link] AC5 — Free-tier team locked out of the Customer
 
   it('creates a real portal session for a team with a currently-active subscription — the paying-team path, unaffected', async () => {
     mockThrowIfNoTeamAccess.mockResolvedValue({
+      // [RELAY-125] the role gate runs before the lockout; OWNER is the role that
+      // reaches it, so these fixtures now say so explicitly.
+      role: 'OWNER',
       team: { slug: 'paying-team', billingId: 'cus_paying' },
     });
     mockGetSession.mockResolvedValue({ user: { email: 'owner@example.com' } });

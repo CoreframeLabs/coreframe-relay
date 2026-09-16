@@ -2,6 +2,8 @@ import { NextApiRequest, NextApiResponse } from 'next';
 
 import { getSession } from '@/lib/session';
 import { throwIfNoTeamAccess } from 'models/team';
+import { throwIfNotAllowed } from 'models/user';
+import { ApiError } from '@/lib/errors';
 import { getByCustomerId as getSubscriptionsByCustomerId } from 'models/subscription';
 import { stripe, getStripeCustomerId } from '@/lib/stripe';
 import env from '@/lib/env';
@@ -11,6 +13,10 @@ export default async function handler(
   res: NextApiResponse
 ) {
   try {
+    if (!env.teamFeatures.payments) {
+      throw new ApiError(404, 'Not Found');
+    }
+
     switch (req.method) {
       case 'POST':
         await handlePOST(req, res);
@@ -31,6 +37,9 @@ export default async function handler(
 
 const handlePOST = async (req: NextApiRequest, res: NextApiResponse) => {
   const teamMember = await throwIfNoTeamAccess(req, res);
+  // [RELAY-125] team_payments is OWNER-only (lib/permissions.ts); the UI already hides
+  // Billing from other roles, this handler never enforced it server-side.
+  throwIfNotAllowed(teamMember, 'team_payments', 'update');
   const session = await getSession(req, res);
 
   // [RELAY-49, AC5] "A Free-tier team is correctly locked out of paid nav" —
