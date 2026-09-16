@@ -1,7 +1,12 @@
 import { hashPassword, verifyPassword } from '@/lib/auth';
 import { getSession } from '@/lib/session';
 import type { NextApiRequest, NextApiResponse } from 'next';
-import { ApiError } from 'next/dist/server/api-utils';
+// [security-audit 2026-09-16] This file imported `ApiError` from
+// `next/dist/server/api-utils`, whose instances carry `.statusCode`, not the
+// `.status` this handler's own `catch` reads (`error.status || 500`). Net effect:
+// a wrong current password answered 500 "Your current password is incorrect"
+// instead of 400. The codebase's own `ApiError` is what every other handler uses.
+import { ApiError } from '@/lib/errors';
 import { recordMetric } from '@/lib/metrics';
 import { getCookie } from 'cookies-next';
 import { sessionTokenCookieName } from '@/lib/nextAuth';
@@ -38,13 +43,24 @@ export default async function handler(
 const handlePUT = async (req: NextApiRequest, res: NextApiResponse) => {
   const session = await getSession(req, res);
 
+  // [security-audit 2026-09-16] Defence in depth. `middleware.ts` already redirects
+  // a session-less request before it reaches here, but this handler's own next
+  // line is `findFirstOrThrow({ where: { id: session?.user.id } })`, and Prisma
+  // treats `{ id: undefined }` as NO filter — so if the middleware matcher ever
+  // regressed (RELAY-129 was exactly such a matcher gap) this would resolve an
+  // arbitrary User row and compare the caller's guess against ITS password hash.
+  // A handler that reads `session?.user.id` must refuse when there is no session.
+  if (!session?.user?.id) {
+    throw new ApiError(401, 'Unauthorized');
+  }
+
   const { currentPassword, newPassword } = validateWithSchema(
     updatePasswordSchema,
     req.body
   );
 
   const user = await findFirstUserOrThrow({
-    where: { id: session?.user.id },
+    where: { id: session.user.id },
   });
 
   if (!(await verifyPassword(currentPassword, user.password as string))) {
@@ -52,7 +68,7 @@ const handlePUT = async (req: NextApiRequest, res: NextApiResponse) => {
   }
 
   await updateUser({
-    where: { id: session?.user.id },
+    where: { id: session.user.id },
     data: { password: await hashPassword(newPassword) },
   });
 
@@ -62,7 +78,7 @@ const handlePUT = async (req: NextApiRequest, res: NextApiResponse) => {
 
     await deleteManySessions({
       where: {
-        userId: session?.user.id,
+        userId: session.user.id,
         NOT: {
           sessionToken,
         },

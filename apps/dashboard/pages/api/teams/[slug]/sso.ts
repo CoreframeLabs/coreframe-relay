@@ -103,7 +103,11 @@ const handlePOST = async (req: NextApiRequest, res: NextApiResponse) => {
 const handlePATCH = async (req: NextApiRequest, res: NextApiResponse) => {
   const teamMember = await throwIfNoTeamAccess(req, res);
 
-  throwIfNotAllowed(teamMember, 'team_sso', 'create');
+  // [security-audit 2026-09-16] `update`, not `create` — this is the PATCH handler.
+  // No effective change today (ADMIN/OWNER hold `*` on team_sso, MEMBER holds
+  // nothing) but the action string is the key the permission table is consulted
+  // by, and it must describe what the handler actually does.
+  throwIfNotAllowed(teamMember, 'team_sso', 'update');
 
   await throwIfNoAccessToConnection({
     teamId: teamMember.teamId,

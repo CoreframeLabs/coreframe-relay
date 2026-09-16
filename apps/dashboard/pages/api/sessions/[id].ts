@@ -1,5 +1,6 @@
 import type { NextApiRequest, NextApiResponse } from 'next';
 import { getSession } from '@/lib/session';
+import { ApiError } from '@/lib/errors';
 import { deleteSession, findFirstSessionOrThrown } from 'models/session';
 import { validateWithSchema, deleteSessionSchema } from '@/lib/zod';
 
@@ -32,10 +33,19 @@ const handleDELETE = async (req: NextApiRequest, res: NextApiResponse) => {
 
   const session = await getSession(req, res);
 
+  // [security-audit 2026-09-16] Defence in depth behind `middleware.ts`. The
+  // ownership check below is `where: { id, userId: session?.user.id }`, and Prisma
+  // drops an `undefined` field from the filter entirely — so with no session the
+  // check degrades to "does a session with this id exist" and the delete that
+  // follows would revoke ANY user's session by id. Refuse before the query.
+  if (!session?.user?.id) {
+    throw new ApiError(401, 'Unauthorized');
+  }
+
   await findFirstSessionOrThrown({
     where: {
       id,
-      userId: session?.user.id,
+      userId: session.user.id,
     },
   });
 
