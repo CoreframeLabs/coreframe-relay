@@ -9,7 +9,8 @@ import { useTranslation } from 'next-i18next';
 import type { ApiResponse } from 'types';
 import { defaultHeaders, maxLengthPolicies } from '@/lib/common';
 import { availableRoles } from '@/lib/permissions';
-import type { Team } from '@prisma/client';
+import { Role, type Team } from '@prisma/client';
+import useCanAccess from 'hooks/useCanAccess';
 
 interface InviteViaEmailProps {
   team: Team;
@@ -18,6 +19,18 @@ interface InviteViaEmailProps {
 
 const InviteViaEmail = ({ setVisible, team }: InviteViaEmailProps) => {
   const { t } = useTranslation('common');
+  const { canAccess } = useCanAccess();
+
+  // [RELAY-159] `team_payments` is OWNER-only in lib/permissions.ts (ADMIN has every
+  // other resource but not this one) -- the same signal TeamTab.tsx already relies on
+  // to gate the Billing tab to OWNER. Reused here as a client-side "am I an OWNER"
+  // check so an ADMIN caller never sees OWNER in the invite dropdown. Convenience
+  // only: the real control is assertCanAssignRole in lib/rbac.ts, enforced server-side
+  // in pages/api/teams/[slug]/invitations.ts.
+  const isOwner = canAccess('team_payments', ['read']);
+  const invitableRoles = isOwner
+    ? availableRoles
+    : availableRoles.filter((role) => role.id !== Role.OWNER);
 
   const FormValidationSchema = Yup.object().shape({
     email: Yup.string()
@@ -26,13 +39,13 @@ const InviteViaEmail = ({ setVisible, team }: InviteViaEmailProps) => {
       .required(t('require-email')),
     role: Yup.string()
       .required(t('required-role'))
-      .oneOf(availableRoles.map((r) => r.id)),
+      .oneOf(invitableRoles.map((r) => r.id)),
   });
 
   const formik = useFormik({
     initialValues: {
       email: '',
-      role: availableRoles[0].id,
+      role: invitableRoles[0].id,
       sentViaEmail: true,
     },
     validationSchema: FormValidationSchema,
@@ -76,7 +89,7 @@ const InviteViaEmail = ({ setVisible, team }: InviteViaEmailProps) => {
           value={formik.values.role}
           required
         >
-          {availableRoles.map((role) => (
+          {invitableRoles.map((role) => (
             <option value={role.id} key={role.id}>
               {role.name}
             </option>

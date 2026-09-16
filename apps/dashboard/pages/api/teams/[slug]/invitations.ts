@@ -1,5 +1,6 @@
 import { sendTeamInviteEmail } from '@/lib/email/sendTeamInviteEmail';
 import { ApiError } from '@/lib/errors';
+import { assertCanAssignRole } from '@/lib/rbac';
 import { sendAudit } from '@/lib/retraced';
 import { getSession } from '@/lib/session';
 import { recordAuditEvent } from '@/lib/audit';
@@ -74,6 +75,13 @@ const handlePOST = async (req: NextApiRequest, res: NextApiResponse) => {
     sentViaEmail: boolean;
     domains?: string;
   };
+
+  // [RELAY-159] `role` is attacker-controllable (it comes straight off req.body,
+  // validated only for shape by inviteViaEmailSchema's z.nativeEnum(Role)) and, unlike
+  // the members PATCH path, nothing upstream already enforces the "Admin can't make
+  // anyone an Owner" rule for a brand-new invitation. Same rule, same message as
+  // lib/rbac.ts's members-path check -- see assertCanAssignRole there.
+  assertCanAssignRole(teamMember.role, role);
 
   let invitation: undefined | Invitation = undefined;
 
