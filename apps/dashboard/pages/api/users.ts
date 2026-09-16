@@ -35,6 +35,14 @@ const handlePUT = async (req: NextApiRequest, res: NextApiResponse) => {
 
   const session = await getSession(req, res);
 
+  // [security-audit 2026-09-16] Defence in depth behind `middleware.ts`, same
+  // reasoning as password.ts / sessions/*.ts: every read below is
+  // `session?.user.id`, and the handler must not reach a Prisma write with an
+  // undefined `where`.
+  if (!session?.user?.id) {
+    throw new ApiError(401, 'Unauthorized');
+  }
+
   if ('email' in data) {
     const allowEmailChange = env.confirmEmail === false;
 
@@ -48,13 +56,13 @@ const handlePUT = async (req: NextApiRequest, res: NextApiResponse) => {
 
     const user = await getUser({ email: data.email });
 
-    if (user && user.id !== session?.user.id) {
+    if (user && user.id !== session.user.id) {
       throw new ApiError(400, 'Email already in use.');
     }
   }
 
   await updateUser({
-    where: { id: session?.user.id },
+    where: { id: session.user.id },
     data,
   });
 

@@ -36,14 +36,38 @@ const verifyWebhookSignature = (req: NextApiRequest) => {
     return false;
   }
 
+  // [security-audit 2026-09-16] Fail closed on an unset secret. `createHmac` with
+  // `undefined` throws inside the handler's try/catch, which already ends the
+  // response with no side effects — but a webhook receiver's signature check
+  // should refuse explicitly, not by accident of an exception path.
+  const secret = env.jackson.dsync.webhook_secret;
+  if (!secret) {
+    return false;
+  }
+
+  // Malformed header (one segment, missing `=`) used to throw a TypeError from
+  // `s.split` on `undefined` — caught upstream, but the same "refuse explicitly"
+  // rule applies.
   const [t, s] = signatureHeader.split(',');
+  if (!t || !s) {
+    return false;
+  }
   const timestamp = parseInt(t.split('=')[1]);
   const signature = s.split('=')[1];
+  if (!signature || Number.isNaN(timestamp)) {
+    return false;
+  }
 
   const expectedSignature = crypto
-    .createHmac('sha256', env.jackson.dsync.webhook_secret as string)
+    .createHmac('sha256', secret)
     .update(`${timestamp}.${JSON.stringify(req.body)}`)
     .digest('hex');
 
-  return signature === expectedSignature;
+  // Constant-time compare. `===` short-circuits on the first differing byte; the
+  // Stripe webhook next to this file and the proxy's `timingSafeEqualStrings` both
+  // already do this — this receiver was the odd one out. Lengths must match before
+  // `timingSafeEqual` is called or it throws.
+  const a = Buffer.from(signature, 'utf8');
+  const b = Buffer.from(expectedSignature, 'utf8');
+  return a.length === b.length && crypto.timingSafeEqual(a, b);
 };

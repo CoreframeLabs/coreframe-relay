@@ -66,14 +66,27 @@ const handleGET = async (req: NextApiRequest, res: NextApiResponse) => {
 const handlePATCH = async (req: NextApiRequest, res: NextApiResponse) => {
   const teamMember = await throwIfNoTeamAccess(req, res);
 
-  throwIfNotAllowed(teamMember, 'team_dsync', 'read');
+  // [security-audit 2026-09-16] `update`, not `read`: this handler writes. Same
+  // effective gate today (MEMBER holds no `team_dsync` action at all; ADMIN/OWNER
+  // hold `*`), but the action string is what the permission table is keyed on and
+  // a future narrowing of ADMIN to read-only would otherwise leave this write open.
+  throwIfNotAllowed(teamMember, 'team_dsync', 'update');
+
+  const directoryId = req.query.directoryId as string;
 
   await throwIfNoAccessToDirectory({
     teamId: teamMember.team.id,
-    directoryId: req.query.directoryId as string,
+    directoryId,
   });
 
-  const body = { ...req.query, ...req.body };
+  // [security-audit 2026-09-16] The guard above validated the URL's `directoryId`.
+  // The previous `{ ...req.query, ...req.body }` spread let a `directoryId` key in
+  // the JSON body override the one the guard checked, so `updateConnection` would
+  // write to whatever directory the BODY named — including another team's — with
+  // jackson's `directories.update` applying `webhook_url`, `webhook_secret`,
+  // `deactivated`, etc. to it. The validated id is now pinned LAST so nothing in
+  // the body can displace it.
+  const body = { ...req.body, ...req.query, directoryId };
 
   const connection = await dsync.updateConnection(body);
 

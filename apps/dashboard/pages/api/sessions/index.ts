@@ -1,6 +1,7 @@
 import type { NextApiRequest, NextApiResponse } from 'next';
 import { getCookie } from 'cookies-next';
 import { getSession } from '@/lib/session';
+import { ApiError } from '@/lib/errors';
 import { sessionTokenCookieName } from '@/lib/nextAuth';
 import {
   findManySessions,
@@ -34,6 +35,15 @@ export default async function handler(
 // Fetch all sessions for the current user
 const handleGET = async (req: NextApiRequest, res: NextApiResponse) => {
   const session = await getSession(req, res);
+
+  // [security-audit 2026-09-16] Defence in depth behind `middleware.ts`: with no
+  // session, `where: { userId: undefined }` is no filter at all to Prisma, and
+  // `findManySessions` would return every user's session rows (ids, user ids,
+  // expiries — the token itself is excluded by RELAY-127's select).
+  if (!session?.user?.id) {
+    throw new ApiError(401, 'Unauthorized');
+  }
+
   const sessionToken = await getCookie(sessionTokenCookieName, { req, res });
 
   // [RELAY-127] `sessionToken` is never selected here — it is a live bearer
@@ -44,7 +54,7 @@ const handleGET = async (req: NextApiRequest, res: NextApiResponse) => {
   const [sessions, currentSession] = await Promise.all([
     findManySessions({
       where: {
-        userId: session?.user.id,
+        userId: session.user.id,
       },
       select: PUBLIC_SESSION_SELECT,
     }),
