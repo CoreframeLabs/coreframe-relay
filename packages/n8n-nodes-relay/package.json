@@ -2,7 +2,7 @@
   "name": "n8n-nodes-relay",
   "version": "0.1.0",
   "private": false,
-  "description": "n8n community node for Coreframe Relay. Send workflow data through a Relay-protected route for durable, retried delivery, using a credential holding the route's own ingest URL. Does not create or manage Relay routes and does not surface live delivery/DLQ status — see README.md.",
+  "description": "n8n community node for Coreframe Relay. Send workflow data through a Relay-protected route for durable, retried delivery, using a credential holding the route's own ingest URL; optionally wait for and report the delivery's DELIVERED/RETRYING/DLQ status with a read-only per-route status token. Does not create or manage Relay routes \u2014 see README.md.",
   "license": "MIT",
   "homepage": "https://github.com/CoreframeLabs/coreframe-relay/blob/main/docs/integrations/n8n.md",
   "keywords": [
@@ -30,7 +30,8 @@
   "n8n": {
     "n8nNodesApiVersion": 1,
     "credentials": [
-      "dist/credentials/RelayIngestApi.credentials.js"
+      "dist/credentials/RelayIngestApi.credentials.js",
+      "dist/credentials/RelayStatusApi.credentials.js"
     ],
     "nodes": [
       "dist/nodes/Relay/Relay.node.js"

@@ -25,14 +25,12 @@ is a new Relay API, it's a thin, typed wrapper n8n users don't have to configure
 - **It does not create, list, or configure Relay routes.** There is no public,
   token-authenticated API for that today — create the route in Relay's own dashboard
   first, then paste its ingest URL into this node's credential.
-- **It does not show live delivery status (DELIVERED / RETRYING / DLQ) in the n8n
-  canvas**, and can't offer a "wait for delivery confirmation" mode either — see
-  "Why there's no delivery-status polling" below for exactly what's blocking that and
-  why it's a backend gap, not something missing from this package's code.
+- **It CAN, optionally, wait for delivery status (DELIVERED / RETRYING / DLQ) after a
+  send** — since RELAY-119, with a second, read-only credential. See "Delivery-status
+  polling" below. Off by default; the send path is unchanged when it is off.
 
-If either of those becomes possible later (a route-management or delivery-status API
-ships on Relay's side), this package is the natural place to add it — nothing here needs
-to be redone.
+If route management becomes possible later (a route-management API ships on Relay's
+side), this package is the natural place to add it — nothing here needs to be redone.
 
 ## Install
 
@@ -84,22 +82,44 @@ check for an HTTP success status, it asserts the response body actually has Rela
 ingest's documented success shape (`{"status":"queued"}`), so a URL that happens to answer
 200 without being a live Relay route still fails the test with an actionable message.
 
-## Why there's no delivery-status polling
+## Delivery-status polling (RELAY-119)
 
-The one gap worth being precise about: this node cannot offer a "wait for delivery
-confirmation" mode that polls Relay's delivery log (`GET
-/api/teams/:slug/relay/log`) for a request's DELIVERED/RETRYING/DLQ status before
-finishing. That endpoint exists and does exactly what you'd want — but it authenticates
-with a NextAuth session cookie (`throwIfNoTeamAccess` → `getSession`), which an n8n
-credential has no way to hold or refresh. Relay does have a separate team-API-key
-mechanism (`apps/dashboard/models/apiKey.ts`), but as of this writing nothing in the
-dashboard actually authenticates a request with it — `getApiKey()`'s only caller is the
-key's own delete-guard, not any data-reading endpoint — so it isn't a usable path today
-either. This is a Relay backend gap, not an n8n limitation: the ingest endpoint this node
-already calls is happy to authenticate a non-browser caller on a per-route token; the
-delivery-log endpoint is not. Closing it is a backend decision (whether to extend the
-existing ingest-token trust boundary to a read, or wire up the unused API-key mechanism)
-big enough to want its own review rather than being decided inside this package.
+Turn on **Wait For Delivery Status** on the node and add a **Relay Status API**
+credential. After each successful send the node polls
+`GET <dashboard>/api/relay/deliveries?requestId=<the id Relay returned>` every 2 seconds
+until the delivery is `DELIVERED`, `FAILED` or `DLQ`, or **Wait Timeout** passes, and
+adds a `delivery` object to the output item:
+
+```json
+{ "ok": true, "status": "queued", "requestId": "…",
+  "delivery": { "status": "DELIVERED", "terminal": true, "attemptCount": 1,
+                "responseCode": 200, "latencyMs": 87, "timedOut": false } }
+```
+
+A timeout is reported (`"timedOut": true`, with the last status seen), never thrown — a
+webhook still `RETRYING` when the wait runs out is Relay doing its job; let the workflow
+decide. A `401` (revoked, expired, or a token for a different route) ends the wait with
+`delivery.error` set.
+
+**The credential.** It is *not* the ingest URL. It is a separate `relay_rt_…` token that
+an ADMIN or OWNER mints for one route — read-only, pinned to that route, expires after
+365 days, revocable, and unable to send anything. Mint it while signed in to Relay:
+
+```
+POST /api/teams/<team-slug>/relay/routes/<route-id>/read-tokens
+{ "name": "n8n orders workflow" }
+```
+
+The token is in the response exactly once. Paste it, plus the dashboard origin
+(e.g. `https://www.coreframe-labs.dev`), into the credential; **Test** proves Relay
+accepted it. Rotate by minting a new one, updating n8n, then
+`DELETE …/read-tokens/<token-id>` on the old one. There is no dashboard button for this
+in v1 — it is API-only for now. Relay enforces one status request per second per token
+(a `429` with `Retry-After`, which the node honours).
+
+Why a second credential rather than reusing the ingest URL: the ingest token is a
+*write* capability that already lives in workflow exports and credential stores; letting
+it also read status would silently upgrade every copy of it ever leaked.
 
 ## Status
 
