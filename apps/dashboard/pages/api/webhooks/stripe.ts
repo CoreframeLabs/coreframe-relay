@@ -99,8 +99,20 @@ export default async function POST(req: NextApiRequest, res: NextApiResponse) {
         default:
           throw new Error('Unhandled relevant event!');
       }
-      // eslint-disable-next-line @typescript-eslint/no-unused-vars
     } catch (error) {
+      // [RELAY-165] This used to discard the error entirely while telling Stripe
+      // to "view your function logs" — which then contained nothing. A 400 here
+      // makes Stripe retry and leaves the event pending; the reason has to be
+      // visible somewhere.
+      console.error(
+        JSON.stringify({
+          level: 'error',
+          event: 'stripe.webhook_handler_failed',
+          type: event.type,
+          eventId: event.id,
+          detail: error instanceof Error ? error.message : String(error),
+        })
+      );
       return res.status(400).json({
         error: {
           message: 'Webhook handler failed. View your nextjs function logs.',
@@ -109,6 +121,40 @@ export default async function POST(req: NextApiRequest, res: NextApiResponse) {
     }
   }
   return res.status(200).json({ received: true });
+}
+
+/**
+ * [RELAY-165] Where a subscription's billing period lives depends on the Stripe API
+ * version the webhook endpoint is pinned to. Up to 2025-03-31, `current_period_start`
+ * / `current_period_end` sat on the Subscription object; from the Basil versions
+ * (the production endpoint runs `2025-05-28.basil`) they exist ONLY on each
+ * subscription item. This handler read the top level unconditionally, so on every
+ * real `customer.subscription.created` it built `new Date(undefined * 1000)` —
+ * an Invalid Date — Prisma threw, the catch below answered 400, and Stripe kept the
+ * event pending forever. Found 2026-09-17 by completing a real test-mode checkout
+ * against production (RELAY-151): zero `Subscription` rows for a paid, active
+ * subscription, and the two 2026-08-31 test subscriptions still pending 17 days on.
+ */
+function subscriptionPeriod(sub: Stripe.Subscription): {
+  start: Date | undefined;
+  end: Date | undefined;
+} {
+  const item = sub.items?.data?.[0] as
+    | (Stripe.SubscriptionItem & {
+        current_period_start?: number;
+        current_period_end?: number;
+      })
+    | undefined;
+  const legacy = sub as Stripe.Subscription & {
+    current_period_start?: number;
+    current_period_end?: number;
+  };
+  const start = item?.current_period_start ?? legacy.current_period_start;
+  const end = item?.current_period_end ?? legacy.current_period_end;
+  return {
+    start: typeof start === 'number' ? new Date(start * 1000) : undefined,
+    end: typeof end === 'number' ? new Date(end * 1000) : undefined,
+  };
 }
 
 // Marks a team as paying after a Payment Link checkout.
@@ -296,15 +342,9 @@ export async function syncTeamPlanForCustomer(customerId: string) {
 }
 
 export async function handleSubscriptionUpdated(event: Stripe.Event) {
-  const {
-    cancel_at,
-    id,
-    status,
-    current_period_end,
-    current_period_start,
-    customer,
-    items,
-  } = event.data.object as Stripe.Subscription;
+  const sub = event.data.object as Stripe.Subscription;
+  const { cancel_at, id, status, customer, items } = sub;
+  const period = subscriptionPeriod(sub);
 
   const subscription = await getBySubscriptionId(id);
   if (!subscription) {
@@ -320,12 +360,8 @@ export async function handleSubscriptionUpdated(event: Stripe.Event) {
   const priceId = items.data.length > 0 ? items.data[0].plan?.id : '';
   await updateStripeSubscription(id, {
     active: isEntitledStatus(status),
-    endDate: current_period_end
-      ? new Date(current_period_end * 1000)
-      : undefined,
-    startDate: current_period_start
-      ? new Date(current_period_start * 1000)
-      : undefined,
+    endDate: period.end,
+    startDate: period.start,
     cancelAt: cancel_at ? new Date(cancel_at * 1000) : undefined,
     priceId,
   });
@@ -334,8 +370,14 @@ export async function handleSubscriptionUpdated(event: Stripe.Event) {
 }
 
 export async function handleSubscriptionCreated(event: Stripe.Event) {
-  const { customer, id, status, current_period_start, current_period_end, items } =
-    event.data.object as Stripe.Subscription;
+  const sub = event.data.object as Stripe.Subscription;
+  const { customer, id, status, items } = sub;
+  const period = subscriptionPeriod(sub);
+  if (!period.start || !period.end) {
+    throw new Error(
+      `customer.subscription.created ${id}: no billing period on the item or the subscription`
+    );
+  }
 
   await createStripeSubscription({
     customerId: customer as string,
@@ -347,8 +389,8 @@ export async function handleSubscriptionCreated(event: Stripe.Event) {
     // authentication that hasn't completed yet), and hardcoding `true` would
     // have marked a team as paying before they'd actually paid.
     active: isEntitledStatus(status),
-    startDate: new Date(current_period_start * 1000),
-    endDate: new Date(current_period_end * 1000),
+    startDate: period.start,
+    endDate: period.end,
     priceId: items.data.length > 0 ? items.data[0].plan?.id : '',
   });
 
