@@ -1,7 +1,7 @@
 import type { NextApiRequest, NextApiResponse } from 'next';
 import { z } from 'zod';
 import { throwIfNoTeamAccess } from 'models/team';
-import { throwIfNotAllowed } from 'models/user';
+import { isAllowed, throwIfNotAllowed } from 'models/user';
 import { createRoute, fetchRoutes, relayUrlFor } from 'models/route';
 import { recordAuditEvent } from '@/lib/audit';
 import { recordMetric } from '@/lib/metrics';
@@ -30,6 +30,17 @@ import { DestinationUrlSchema } from '@coreframe-relay/types';
  * trip from every Routes-page load with no change in who is authorized to do what.
  */
 type TeamAccess = Awaited<ReturnType<typeof throwIfNoTeamAccess>>;
+
+/**
+ * [RELAY-122] Stands in for a route's live `ingestToken` in `GET /routes` for a caller
+ * who lacks `team:update` (i.e. a MEMBER). Deliberately NOT a plausible-looking token —
+ * a MEMBER's browser must never receive a string that could be mistaken for, mistyped
+ * as, or accidentally used in place of, the real bearer credential a sender would need.
+ * See `growth/product/relay-119-121-122-decision-2026-09-17.md` §3 for the decision;
+ * `models/route.ts`'s `PUBLIC_ROUTE_SELECT` comment for why `fetchRoutes` still selects
+ * the real column this replaces.
+ */
+const REDACTED_INGEST_TOKEN = 'redacted';
 
 const createRouteSchema = z.object({
   name: z.string().trim().min(1, 'Name is required').max(64),
@@ -89,6 +100,16 @@ const handleGET = async (
 
   recordMetric('route.fetched');
 
+  // [RELAY-122] MEMBER holds `team:read`, which is enough to see that routes exist —
+  // name, slug, destination, status, retries, created — but the ingest URL's token
+  // segment is the live bearer credential (`relayUrlFor`'s whole reason for existing
+  // is to embed it), and pointing a sender at that URL is exactly the "changes what
+  // the team accepts from the internet" class of action MEMBER is already denied
+  // everywhere else in this directory (`routes/index.ts`'s own POST, `rotate-token.ts`,
+  // `[routeId]/index.ts`'s PATCH). `team:update` is the SAME check those write
+  // endpoints gate on, reused here as a read-only yes/no rather than reimplemented.
+  const reveal = isAllowed(teamMember.role, 'team', 'update');
+
   res.status(200).json({
     data: routes.map((route) => ({
       id: route.id,
@@ -100,7 +121,14 @@ const handleGET = async (
       status: route.status,
       createdAt: route.createdAt,
       updatedAt: route.updatedAt,
-      relayUrl: relayUrlFor(teamMember.team.slug, route.slug, route.ingestToken),
+      relayUrl: relayUrlFor(
+        teamMember.team.slug,
+        route.slug,
+        reveal ? route.ingestToken : REDACTED_INGEST_TOKEN
+      ),
+      // Lets the client render a masked, non-interactive span instead of trying to
+      // reveal/copy a URL whose token segment is already a placeholder.
+      ingestUrlRedacted: !reveal,
     })),
   });
 };

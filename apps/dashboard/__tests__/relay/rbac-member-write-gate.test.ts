@@ -65,7 +65,14 @@ jest.mock('models/route', () => ({
   setRouteDestinationHeaders: jest.fn(),
   fetchRouteBySlugs: jest.fn(),
   updateRoute: jest.fn(),
-  relayUrlFor: jest.fn(() => 'https://relay.example.test/in/team/route/token'),
+  // [RELAY-122] Interpolates its real third argument (rather than returning a fixed
+  // string) so a test can tell, from the response body alone, whether the CALLER
+  // passed the live ingestToken or a redacted placeholder — see
+  // 'GET /routes redacts the ingest token for MEMBER, reveals it for ADMIN' below.
+  relayUrlFor: jest.fn(
+    (teamSlug: string, routeSlug: string, token: string) =>
+      `https://relay.example.test/in/${teamSlug}/${routeSlug}/${token}`
+  ),
 }));
 
 jest.mock('models/dlq', () => ({
@@ -422,6 +429,66 @@ describe('read endpoints — MEMBER is NOT blocked (reads are open to every team
 
     expect(statusOf(res)).toBe(200);
     expect(routeModel.fetchRoutes).toHaveBeenCalledWith(TEAM_ID);
+  });
+
+  // [RELAY-122] `GET /routes` stays open to MEMBER (`team:read`), but the ingest
+  // token — the live bearer credential a sender would need — must never reach a
+  // MEMBER's browser. `TOKEN_SENTINEL` stands in for the real value: its absence from
+  // the MEMBER body, and presence in the ADMIN body, is the actual proof; a raw
+  // "200 with some string" assertion would pass even if redaction were never wired up.
+  describe('routes/index.ts GET redacts the ingest token for MEMBER, reveals it for ADMIN', () => {
+    const TOKEN_SENTINEL = 'TOKEN_SENTINEL';
+    const ROUTE = {
+      id: 'route-1',
+      teamId: TEAM_ID,
+      name: 'Orders webhook',
+      slug: 'orders',
+      destination: 'https://dest.example.com/hook',
+      maxRetries: 7,
+      status: 'ACTIVE',
+      createdAt: new Date('2026-01-01T00:00:00.000Z'),
+      updatedAt: new Date('2026-01-01T00:00:00.000Z'),
+      ingestToken: TOKEN_SENTINEL,
+    };
+
+    it('MEMBER: 200, body omits the sentinel in both ingestUrlRedacted fields', async () => {
+      setRole(Role.MEMBER);
+      (routeModel.fetchRoutes as jest.Mock).mockResolvedValue([ROUTE]);
+
+      const req = makeRequest('GET', { slug: TEAM_SLUG });
+      const res = makeResponse();
+      await routesIndexHandler(req, res);
+
+      expect(statusOf(res)).toBe(200);
+      const body = bodyOf<{ data: Array<{ relayUrl: string; ingestUrlRedacted: boolean }> }>(
+        res
+      );
+      const row = body.data[0];
+      expect(row.ingestUrlRedacted).toBe(true);
+      expect(row.relayUrl).not.toContain(TOKEN_SENTINEL);
+      // The placeholder must never equal, nor contain, the real token.
+      expect(row.relayUrl.endsWith(`/${TOKEN_SENTINEL}`)).toBe(false);
+      const bodyText = JSON.stringify(body);
+      expect(bodyText).not.toContain(TOKEN_SENTINEL);
+    });
+
+    it('ADMIN: 200, body carries the real token', async () => {
+      setRole(Role.ADMIN);
+      (routeModel.fetchRoutes as jest.Mock).mockResolvedValue([ROUTE]);
+
+      const req = makeRequest('GET', { slug: TEAM_SLUG });
+      const res = makeResponse();
+      await routesIndexHandler(req, res);
+
+      expect(statusOf(res)).toBe(200);
+      const body = bodyOf<{ data: Array<{ relayUrl: string; ingestUrlRedacted: boolean }> }>(
+        res
+      );
+      const row = body.data[0];
+      expect(row.ingestUrlRedacted).toBe(false);
+      expect(row.relayUrl).toContain(TOKEN_SENTINEL);
+      expect(row.relayUrl.endsWith(`/${TOKEN_SENTINEL}`)).toBe(true);
+    });
   });
 
   it('log.ts GET reaches fetchTeamDeliveryFeed for a MEMBER', async () => {
