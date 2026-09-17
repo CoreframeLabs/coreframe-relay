@@ -32,13 +32,18 @@ import { NodeApiError, NodeConnectionTypes, NodeOperationError } from 'n8n-workf
  *     routes are all gated by a NextAuth session cookie via `getCurrentUserWithTeam`, not
  *     by a bearer token an external node could hold) — building against it would mean
  *     inventing an API that isn't there. Create the route in Relay's own dashboard first.
- *   - It does not read or display live DELIVERED/RETRYING/DLQ status, and cannot offer a
- *     "wait for delivery confirmation" mode. `GET /api/teams/:slug/relay/log` DOES exist
- *     and returns exactly this, but it authenticates with a NextAuth session cookie
- *     (`throwIfNoTeamAccess` → `getSession`), which an n8n credential has no way to hold.
- *     The team-API-key mechanism in `models/apiKey.ts` looks like an alternative but isn't
- *     one yet: `getApiKey()`'s only caller today is the key's own delete-guard, not any
- *     data-reading endpoint. See README.md, "Why there's no delivery-status polling".
+ *
+ * What it DOES do since [RELAY-119], optionally: after a successful send, poll
+ * `GET /api/relay/deliveries?requestId=` on the Relay dashboard with the second,
+ * read-only `relayStatusApi` credential until the delivery reaches a terminal state
+ * (DELIVERED / FAILED / DLQ) or a timeout elapses, and report what it saw on the output
+ * item. That endpoint authenticates a per-route bearer token (`relay_rt_…`), pinned to
+ * ONE route and able to read nothing but delivery metadata — see
+ * `RelayStatusApi.credentials.ts`. The token is not derived from the ingest URL and the
+ * ingest URL cannot read status; the two credentials are independent on purpose.
+ *
+ * A timeout is NOT an error: a webhook still RETRYING when the wait runs out is Relay
+ * doing its job, so the item carries `delivery.timedOut: true` and the workflow decides.
  */
 export class Relay implements INodeType {
 	description: INodeTypeDescription = {
@@ -58,6 +63,12 @@ export class Relay implements INodeType {
 			{
 				name: 'relayIngestApi',
 				required: true,
+			},
+			{
+				// [RELAY-119] Optional: only consulted when "Wait For Delivery Status" is on.
+				name: 'relayStatusApi',
+				required: false,
+				displayOptions: { show: { waitForDelivery: [true] } },
 			},
 		],
 		properties: [
@@ -95,6 +106,27 @@ export class Relay implements INodeType {
 				description:
 					"Whether to tag this request with Relay's own test marker (x-relay-event: test), so it " +
 					"shows up as TEST in Relay's delivery log instead of being counted as production traffic",
+			},
+			{
+				displayName: 'Wait For Delivery Status',
+				name: 'waitForDelivery',
+				type: 'boolean',
+				default: false,
+				description:
+					'Whether to poll Relay after the send until this request is DELIVERED, FAILED or ' +
+					'dead-lettered (or the timeout passes), and add the result as "delivery" on the ' +
+					'output item. Needs a Relay Status API credential (a read token for this route).',
+			},
+			{
+				displayName: 'Wait Timeout (Seconds)',
+				name: 'waitTimeoutSeconds',
+				type: 'number',
+				default: 30,
+				typeOptions: { minValue: 2, maxValue: 600 },
+				displayOptions: { show: { waitForDelivery: [true] } },
+				description:
+					'How long to keep polling before giving up. Relay retries with backoff for minutes, ' +
+					'so a still-RETRYING delivery at timeout is reported, not treated as a failure.',
 			},
 			{
 				displayName: 'Headers',
@@ -138,6 +170,24 @@ export class Relay implements INodeType {
 			);
 		}
 
+		// [RELAY-119] Resolved once: the toggle is node-level in practice, and a missing
+		// status credential should fail before the first send goes out, not after it.
+		const waitForDelivery = this.getNodeParameter('waitForDelivery', 0, false) as boolean;
+		let statusBaseUrl = '';
+		if (waitForDelivery) {
+			const statusCredentials = await this.getCredentials('relayStatusApi');
+			statusBaseUrl = String(statusCredentials?.baseUrl ?? '')
+				.trim()
+				.replace(/\/+$/, '');
+			if (!/^https:\/\/[^/\s]+$/.test(statusBaseUrl)) {
+				throw new NodeOperationError(
+					this.getNode(),
+					'"Wait For Delivery Status" is on, but the Relay Status API credential\'s Dashboard URL ' +
+						'is not an https origin (expected e.g. https://www.coreframe-labs.dev, no path).',
+				);
+			}
+		}
+
 		for (let itemIndex = 0; itemIndex < items.length; itemIndex++) {
 			try {
 				const bodySource = this.getNodeParameter('bodySource', itemIndex, 'item') as string;
@@ -173,14 +223,21 @@ export class Relay implements INodeType {
 					body?: IDataObject;
 				};
 
-				returnData.push({
-					json: {
-						ok: true,
-						statusCode: response.statusCode,
-						...(response.body ?? {}),
-					},
-					pairedItem: itemIndex,
-				});
+				const output: IDataObject = {
+					ok: true,
+					statusCode: response.statusCode,
+					...(response.body ?? {}),
+				};
+
+				if (waitForDelivery) {
+					const requestId = String(response.body?.requestId ?? '');
+					const timeoutSeconds = this.getNodeParameter('waitTimeoutSeconds', itemIndex, 30) as number;
+					output.delivery = requestId
+						? await pollDeliveryStatus(this, statusBaseUrl, requestId, timeoutSeconds * 1000)
+						: { timedOut: false, terminal: false, error: 'Relay did not return a requestId to poll' };
+				}
+
+				returnData.push({ json: output, pairedItem: itemIndex });
 			} catch (error) {
 				const description = describeRelayError(error);
 				if (this.continueOnFail()) {
@@ -335,5 +392,76 @@ export function describeRelayError(error: unknown): string {
 				(statusCode ? ` with status ${statusCode}` : '') +
 				`: ${err.message ?? String(error)}`
 			);
+	}
+}
+
+/** The delivery statuses after which Relay will not change the row again. */
+export const TERMINAL_DELIVERY_STATUSES = new Set(['DELIVERED', 'FAILED', 'DLQ']);
+
+/**
+ * [RELAY-119] Poll `GET {baseUrl}/api/relay/deliveries?requestId=` until `terminal`
+ * or the deadline. The endpoint enforces a per-token floor of one request per second
+ * (429 + Retry-After), so the interval starts at 2s and any 429 is honoured rather than
+ * retried immediately. A 404 while polling is expected for the first moment after a
+ * send (the delivery row is written by the consumer, not the ingest path) and is
+ * treated as "not yet", not as an error. Anything else non-2xx ends the wait with the
+ * error recorded on the result — never thrown, because by this point the send itself
+ * succeeded and that is the item's primary fact.
+ *
+ * `sleep` is injectable so the unit tests do not have to wait real seconds.
+ */
+export async function pollDeliveryStatus(
+	ctx: IExecuteFunctions,
+	baseUrl: string,
+	requestId: string,
+	timeoutMs: number,
+	sleep: (ms: number) => Promise<void> = (ms) => new Promise((r) => setTimeout(r, ms)),
+): Promise<IDataObject> {
+	const deadline = Date.now() + timeoutMs;
+	let last: IDataObject | undefined;
+	let waitMs = 2000;
+
+	while (true) {
+		try {
+			const res = (await ctx.helpers.httpRequestWithAuthentication.call(ctx, 'relayStatusApi', {
+				method: 'GET',
+				url: `${baseUrl}/api/relay/deliveries`,
+				qs: { requestId },
+				json: true,
+				returnFullResponse: true,
+			})) as { statusCode: number; body?: { data?: IDataObject } };
+			const data = res.body?.data;
+			if (data && typeof data === 'object') {
+				last = data;
+				if (data.terminal === true || TERMINAL_DELIVERY_STATUSES.has(String(data.status))) {
+					return { ...data, timedOut: false };
+				}
+			}
+			waitMs = 2000;
+		} catch (error) {
+			const status = extractStatusCode(error);
+			if (status === 429) {
+				const retryAfter = Number((error as { response?: { headers?: Record<string, string> } }).response?.headers?.['retry-after']);
+				waitMs = Number.isFinite(retryAfter) && retryAfter > 0 ? retryAfter * 1000 : 2000;
+			} else if (status === 404) {
+				waitMs = 2000;
+			} else {
+				return {
+					...(last ?? {}),
+					requestId,
+					timedOut: false,
+					terminal: false,
+					error:
+						status === 401
+							? 'Relay rejected the Status API token (401) — it may be revoked, expired, or for another route.'
+							: describeRelayError(error),
+				};
+			}
+		}
+
+		if (Date.now() + waitMs > deadline) {
+			return { ...(last ?? { requestId, status: 'UNKNOWN' }), timedOut: true, terminal: false };
+		}
+		await sleep(waitMs);
 	}
 }

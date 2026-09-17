@@ -463,3 +463,26 @@ poll-pattern-safe. No fix made or required.**
 
 (For completeness: the same file's diff already passes the scope's own
 concurrency test — 30 interleaved scoped queries share nothing, 0 leaks.)
+
+## [RELAY-119] A seventh protected table, and the one sanctioned unscoped read
+
+`RelayReadToken` (the per-route delivery read token) joins `RLS_PROTECTED_MODELS`
+with the same `relay_team_isolation` policy shape as `Route`/`AuditLog` — policy in
+`supabase/migrations/20260917120000_relay_119_read_token_rls.sql`, table in the Prisma
+migration of the same timestamp.
+
+It differs from the other six in one way: the row is read BEFORE the team is known,
+because the bearer token IS what identifies the team. That read does not go through
+the model extension at all — it is `SELECT * FROM relay_read_token_lookup($hash)`, a
+`SECURITY DEFINER` function whose only predicate is an equality on the hash, owned by
+the DDL role (`postgres`, `rolbypassrls=t`) and executable only by `relay_app`. The
+migration raises if its owner does not bypass RLS. Everything else on the table (mint,
+list, revoke, the post-auth `lastUsedAt` write) is an ordinary scoped model call.
+
+Verified on a throwaway `postgres:15` container with all four `supabase/migrations`
+applied in order, connecting as `relay_app`: unscoped `SELECT count(*)` → 0; the
+function → exactly the one row for a known hash, 0 for an unknown one; scoped to
+`team-a`, an `UPDATE` on team-b's token → `UPDATE 0`, an `INSERT` for team-b →
+`new row violates row-level security policy`. And through the built app on that same
+connection: unauthenticated `GET /api/relay/deliveries` → 401 JSON (not a 307),
+team A's token asking for team B's `requestId` → 404 identical to a nonexistent one.

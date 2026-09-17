@@ -7,8 +7,10 @@ import {
 	describeRelayError,
 	extractStatusCode,
 	isLikelyIngestUrl,
+	pollDeliveryStatus,
 	relayErrorTitle,
 } from '../src/nodes/Relay/Relay.node';
+import { RelayStatusApi } from '../src/credentials/RelayStatusApi.credentials';
 
 const VALID_URL = 'https://relay.example.com/in/acme/stripe-orders/tok_abc123';
 
@@ -23,23 +25,47 @@ function buildContext(opts: {
 	credentials?: Record<string, unknown>;
 	params?: Record<string, unknown>;
 	httpRequest?: ReturnType<typeof vi.fn>;
+	httpRequestWithAuthentication?: ReturnType<typeof vi.fn>;
+	statusCredentials?: Record<string, unknown>;
 	continueOnFail?: boolean;
 }) {
 	const { items, credentials = { ingestUrl: VALID_URL }, params = {}, continueOnFail = false } = opts;
 
 	const httpRequest = opts.httpRequest ?? vi.fn().mockResolvedValue({ statusCode: 200, body: { status: 'queued', requestId: 'req_1' } });
+	const httpRequestWithAuthentication = opts.httpRequestWithAuthentication ?? vi.fn();
 
 	const ctx = {
 		getInputData: () => items,
-		getCredentials: vi.fn().mockResolvedValue(credentials),
+		// [RELAY-119] Two credential types now: the ingest URL (always) and, when polling,
+		// the status token. Keyed by name so a test can hand over either or both.
+		getCredentials: vi.fn().mockImplementation(async (name: string) =>
+			name === 'relayStatusApi' ? opts.statusCredentials : credentials,
+		),
 		getNodeParameter: (name: string, _itemIndex: number, fallback?: unknown) =>
 			name in params ? params[name] : fallback,
 		continueOnFail: () => continueOnFail,
 		getNode: () => ({ id: 'n1', name: 'Relay', type: 'relay', typeVersion: 1, position: [0, 0], parameters: {} }),
-		helpers: { httpRequest },
+		helpers: { httpRequest, httpRequestWithAuthentication },
 	};
 
-	return { ctx: ctx as unknown as IExecuteFunctions, httpRequest };
+	return { ctx: ctx as unknown as IExecuteFunctions, httpRequest, httpRequestWithAuthentication };
+}
+
+const STATUS_BASE = 'https://relay-dashboard.example.com';
+const noSleep = async () => undefined;
+
+/** A status-endpoint double: answers each call from a scripted sequence. */
+function scriptedStatus(script: Array<{ status: number; data?: Record<string, unknown>; retryAfter?: string }>) {
+	let i = 0;
+	return vi.fn().mockImplementation(async () => {
+		const step = script[Math.min(i++, script.length - 1)];
+		if (step.status >= 200 && step.status < 300) {
+			return { statusCode: step.status, body: { data: step.data } };
+		}
+		const err: Record<string, unknown> = { statusCode: step.status, message: `HTTP ${step.status}` };
+		if (step.retryAfter) err.response = { headers: { 'retry-after': step.retryAfter } };
+		throw err;
+	});
 }
 
 describe('isLikelyIngestUrl', () => {
@@ -241,5 +267,136 @@ describe('Relay node execute()', () => {
 		expect(result[0]).toHaveLength(2);
 		expect(result[0][0].json.ok).toBe(false);
 		expect(result[0][1].json.ok).toBe(true);
+	});
+});
+
+// ─── [RELAY-119] delivery-status polling ─────────────────────────────────────────────
+
+describe('RelayStatusApi credential', () => {
+	it('injects the token as a Bearer header via the generic authenticate block', () => {
+		const cred = new RelayStatusApi();
+		expect(cred.name).toBe('relayStatusApi');
+		expect(cred.authenticate.properties.headers?.Authorization).toBe('=Bearer {{$credentials.token}}');
+		const tokenProp = cred.properties.find((p) => p.name === 'token');
+		expect(tokenProp?.typeOptions?.password).toBe(true);
+	});
+
+	it('tests against the introspection shape of GET /api/relay/deliveries, not a bare 2xx', () => {
+		const cred = new RelayStatusApi();
+		expect(cred.test.request.url).toBe('/api/relay/deliveries');
+		expect(cred.test.request.method).toBe('GET');
+		expect(cred.test.rules?.[0]).toMatchObject({
+			type: 'responseSuccessBody',
+			properties: { key: 'data.scope', value: 'delivery:read' },
+		});
+	});
+});
+
+describe('pollDeliveryStatus', () => {
+	const ctxFor = (fn: ReturnType<typeof vi.fn>) =>
+		({ helpers: { httpRequestWithAuthentication: fn } }) as unknown as IExecuteFunctions;
+
+	it('uses the relayStatusApi credential, passes requestId as a query param, stops at terminal', async () => {
+		const fn = scriptedStatus([
+			{ status: 200, data: { requestId: 'req_1', status: 'QUEUED', terminal: false } },
+			{ status: 200, data: { requestId: 'req_1', status: 'RETRYING', terminal: false, attemptCount: 2 } },
+			{ status: 200, data: { requestId: 'req_1', status: 'DELIVERED', terminal: true, attemptCount: 3, responseCode: 200 } },
+		]);
+		const result = await pollDeliveryStatus(ctxFor(fn), STATUS_BASE, 'req_1', 60_000, noSleep);
+
+		expect(fn).toHaveBeenCalledTimes(3);
+		expect(fn.mock.calls[0][0]).toBe('relayStatusApi');
+		expect(fn.mock.calls[0][1]).toMatchObject({
+			method: 'GET',
+			url: `${STATUS_BASE}/api/relay/deliveries`,
+			qs: { requestId: 'req_1' },
+		});
+		expect(result).toMatchObject({ status: 'DELIVERED', terminal: true, attemptCount: 3, timedOut: false });
+	});
+
+	it('treats an early 404 as "not yet" and keeps polling', async () => {
+		const fn = scriptedStatus([
+			{ status: 404 },
+			{ status: 200, data: { requestId: 'req_1', status: 'DLQ', terminal: true } },
+		]);
+		const result = await pollDeliveryStatus(ctxFor(fn), STATUS_BASE, 'req_1', 60_000, noSleep);
+		expect(fn).toHaveBeenCalledTimes(2);
+		expect(result).toMatchObject({ status: 'DLQ', terminal: true, timedOut: false });
+	});
+
+	it('honours Retry-After on 429 (the per-token 1 rps floor) instead of hammering', async () => {
+		const sleeps: number[] = [];
+		const sleep = async (ms: number) => {
+			sleeps.push(ms);
+		};
+		const fn = scriptedStatus([
+			{ status: 429, retryAfter: '1' },
+			{ status: 200, data: { requestId: 'req_1', status: 'DELIVERED', terminal: true } },
+		]);
+		await pollDeliveryStatus(ctxFor(fn), STATUS_BASE, 'req_1', 60_000, sleep);
+		expect(sleeps).toEqual([1000]);
+	});
+
+	it('reports timedOut with the last seen status, without throwing', async () => {
+		const fn = scriptedStatus([{ status: 200, data: { requestId: 'req_1', status: 'RETRYING', terminal: false } }]);
+		// 2s interval, 1.5s budget: one poll, then the next wait would cross the deadline.
+		const result = await pollDeliveryStatus(ctxFor(fn), STATUS_BASE, 'req_1', 1_500, noSleep);
+		expect(result).toMatchObject({ status: 'RETRYING', terminal: false, timedOut: true });
+	});
+
+	it('ends the wait with a specific error on 401 (revoked/expired/other-route token)', async () => {
+		const fn = scriptedStatus([{ status: 401 }]);
+		const result = await pollDeliveryStatus(ctxFor(fn), STATUS_BASE, 'req_1', 60_000, noSleep);
+		expect(fn).toHaveBeenCalledTimes(1);
+		expect(result).toMatchObject({ terminal: false, timedOut: false });
+		expect(String(result.error)).toMatch(/401/);
+	});
+});
+
+describe('Relay node execute() with Wait For Delivery Status', () => {
+	it('leaves the send path untouched when the toggle is off (no status credential read)', async () => {
+		const items: INodeExecutionData[] = [{ json: { a: 1 } }];
+		const { ctx, httpRequestWithAuthentication } = buildContext({
+			items,
+			params: { bodySource: 'item', markAsTest: false, headers: {}, waitForDelivery: false },
+		});
+		const result = await new Relay().execute.call(ctx);
+		expect(httpRequestWithAuthentication).not.toHaveBeenCalled();
+		expect(result[0][0].json).not.toHaveProperty('delivery');
+		expect((ctx.getCredentials as unknown as ReturnType<typeof vi.fn>)).not.toHaveBeenCalledWith('relayStatusApi');
+	});
+
+	it('polls after a successful send and attaches the terminal delivery to the item', async () => {
+		const items: INodeExecutionData[] = [{ json: { a: 1 } }];
+		const httpRequestWithAuthentication = scriptedStatus([
+			{ status: 200, data: { requestId: 'req_1', status: 'DELIVERED', terminal: true, responseCode: 200 } },
+		]);
+		const { ctx, httpRequest } = buildContext({
+			items,
+			params: { bodySource: 'item', markAsTest: false, headers: {}, waitForDelivery: true, waitTimeoutSeconds: 10 },
+			statusCredentials: { baseUrl: `${STATUS_BASE}/`, token: 'relay_rt_x' },
+			httpRequestWithAuthentication,
+		});
+		const result = await new Relay().execute.call(ctx);
+
+		expect(httpRequest).toHaveBeenCalledTimes(1);
+		// Trailing slash on the credential is tolerated; the poll URL has exactly one.
+		expect(httpRequestWithAuthentication.mock.calls[0][1].url).toBe(`${STATUS_BASE}/api/relay/deliveries`);
+		expect(result[0][0].json).toMatchObject({
+			ok: true,
+			requestId: 'req_1',
+			delivery: { status: 'DELIVERED', terminal: true, responseCode: 200, timedOut: false },
+		});
+	});
+
+	it('fails up front, before any send, when the toggle is on but the status base URL is not an https origin', async () => {
+		const items: INodeExecutionData[] = [{ json: {} }];
+		const { ctx, httpRequest } = buildContext({
+			items,
+			params: { bodySource: 'item', markAsTest: false, headers: {}, waitForDelivery: true },
+			statusCredentials: { baseUrl: 'https://relay.example.com/teams/acme', token: 'relay_rt_x' },
+		});
+		await expect(new Relay().execute.call(ctx)).rejects.toBeInstanceOf(NodeOperationError);
+		expect(httpRequest).not.toHaveBeenCalled();
 	});
 });

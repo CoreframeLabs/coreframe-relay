@@ -45,7 +45,18 @@ type TenantScope = {
 
 const storage = new AsyncLocalStorage<TenantScope>();
 
-/** The six tables RELAY-11 put policies on. Everything else has no RLS. */
+/**
+ * The six tables RELAY-11 put policies on, plus [RELAY-119]'s `RelayReadToken`
+ * (policy in `supabase/migrations/20260917120000_relay_119_read_token_rls.sql`).
+ * Everything else has no RLS.
+ *
+ * `RelayReadToken` has one deliberate exception to "every read is scoped": the
+ * bearer-token lookup on `GET /api/relay/deliveries` runs BEFORE the team is known,
+ * via the definer-rights SQL function `relay_read_token_lookup(hash)` — a `$queryRaw`,
+ * so it never passes through the model extension at all. Every other operation on the
+ * table (mint, list, revoke, the post-auth `lastUsedAt` write) is a model call and IS
+ * scoped here. See `models/readToken.ts`.
+ */
 export const RLS_PROTECTED_MODELS: ReadonlySet<string> = new Set([
   'Route',
   'DeliveryLog',
@@ -53,6 +64,7 @@ export const RLS_PROTECTED_MODELS: ReadonlySet<string> = new Set([
   'GateRule',
   'ApprovalRequest',
   'AuditLog',
+  'RelayReadToken',
 ]);
 
 /**
