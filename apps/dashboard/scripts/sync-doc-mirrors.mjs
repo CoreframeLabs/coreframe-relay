@@ -19,7 +19,7 @@
  * deliberately no reverse direction: this script only ever writes into
  * `public/`, never back into `docs/`.
  */
-import { copyFileSync, mkdirSync, readFileSync } from 'node:fs';
+import { copyFileSync, existsSync, mkdirSync, readFileSync, readdirSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -38,4 +38,27 @@ for (const { source, dest } of mirrors) {
   mkdirSync(dirname(dest), { recursive: true });
   copyFileSync(source, dest);
   console.log(`[sync-doc-mirrors] ${source} -> ${dest} (${body.length} bytes)`);
+}
+
+// [RELAY-163] `docs/troubleshooting/*.md` is a growing, Markdown-file-drop set
+// (one file per page, RELAY-149 onward) rather than the single hand-added entry
+// each integration above got — the whole point of RELAY-163's route is that
+// dropping a new file here is enough, with nothing else to edit. So this half
+// mirrors every file in the directory instead of extending the `mirrors` array
+// per page. `existsSync` guard: at the time this ticket lands the directory has
+// zero real pages (RELAY-149 is being drafted in parallel), so this must not
+// throw on a missing/empty directory.
+const troubleshootingSrcDir = join(repoRoot, 'docs', 'troubleshooting');
+const troubleshootingDestDir = join(dashboardRoot, 'public', 'docs', 'troubleshooting');
+
+if (existsSync(troubleshootingSrcDir)) {
+  const files = readdirSync(troubleshootingSrcDir).filter((name) => name.endsWith('.md'));
+  for (const name of files) {
+    const source = join(troubleshootingSrcDir, name);
+    const dest = join(troubleshootingDestDir, name);
+    const body = readFileSync(source, 'utf8');
+    mkdirSync(dirname(dest), { recursive: true });
+    copyFileSync(source, dest);
+    console.log(`[sync-doc-mirrors] ${source} -> ${dest} (${body.length} bytes)`);
+  }
 }

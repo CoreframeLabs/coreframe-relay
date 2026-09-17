@@ -24,7 +24,10 @@ import DocsPage, { docsGetLayout } from '@/components/docs/DocsPage';
 import { CodeWindow } from '@/components/docs/CodeWindow';
 import { LandingLink, focusRing } from '@/components/defaultLanding/LandingPrimitives';
 import type { DocsSection } from '@/components/docs/DocsPage';
+import { listSatellitesForPillar } from '@/lib/docs/troubleshooting';
 import type { NextPageWithLayout } from 'types';
+
+const PILLAR_PATH = '/docs/integrations/n8n';
 
 const extLink = `rounded text-landing-accent-text underline underline-offset-2 hover:text-landing-accent-text-hover ${focusRing}`;
 
@@ -82,7 +85,7 @@ const bugCapabilityRows: {
   },
 ];
 
-const sections: DocsSection[] = [
+const staticSections: DocsSection[] = [
   {
     id: 'the-problem',
     title: 'The problem',
@@ -428,7 +431,47 @@ const sections: DocsSection[] = [
   },
 ];
 
-const N8nDocsPage: NextPageWithLayout = () => (
+type Satellite = { slug: string; problemPhrase: string };
+
+/**
+ * [RELAY-163] "Troubleshooting specific failures" — pillar→satellite links.
+ *
+ * Per the spec's internal-link rule: "add a section ... listing each live
+ * satellite with anchor text equal to the satellite's problem phrase ... Add
+ * the row when the satellite goes live, not before." `satellites` comes from
+ * `listSatellitesForPillar('/docs/integrations/n8n')` (`getStaticProps` below),
+ * which only ever returns pages that actually exist under
+ * `docs/troubleshooting/` with `pillar: /docs/integrations/n8n` in their
+ * frontmatter — so "not before" is enforced by there being no row to render
+ * until a real file lands, rather than by a step to remember later. At the time
+ * this ticket ships there are zero such files (RELAY-149 is being drafted in
+ * parallel), so this section doesn't render at all.
+ */
+const satellitesSection = (satellites: Satellite[]): DocsSection[] =>
+  satellites.length === 0
+    ? []
+    : [
+        {
+          id: 'troubleshooting-specific-failures',
+          title: 'Troubleshooting specific failures',
+          body: (
+            <ul className="list-disc space-y-2 pl-5">
+              {satellites.map((s) => (
+                <li key={s.slug}>
+                  <Link
+                    href={`/docs/troubleshooting/${s.slug}`}
+                    className={`rounded text-landing-accent-text underline underline-offset-2 hover:text-landing-accent-text-hover ${focusRing}`}
+                  >
+                    {s.problemPhrase}
+                  </Link>
+                </li>
+              ))}
+            </ul>
+          ),
+        },
+      ];
+
+const N8nDocsPage: NextPageWithLayout<{ satellites: Satellite[] }> = ({ satellites }) => (
   <DocsPage
     eyebrow="Docs · Integrations"
     title="Using Relay in front of an n8n webhook"
@@ -457,13 +500,19 @@ const N8nDocsPage: NextPageWithLayout = () => (
         </Link>
       </div>
     }
-    sections={sections}
+    sections={[...staticSections, ...satellitesSection(satellites)]}
   />
 );
 
 export const getStaticProps = async ({ locale }: GetStaticPropsContext) => {
+  const satellites: Satellite[] = listSatellitesForPillar(PILLAR_PATH).map((page) => ({
+    slug: page.slug,
+    problemPhrase: page.data.title,
+  }));
+
   return {
     props: {
+      satellites,
       ...(locale ? await serverSideTranslations(locale, ['common']) : {}),
     },
   };
