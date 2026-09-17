@@ -86,6 +86,17 @@ const unAuthenticatedRoutes = [
   // discipline: /api/relay/internal/* would silently un-authenticate any future
   // file dropped into that directory.
   '/api/relay/internal/n8n-channel-metrics',
+  // [RELAY-119] The delivery-status read an n8n workflow polls, authenticated by a
+  // per-route `RelayReadToken` bearer (`Authorization: Bearer relay_rt_…`), checked
+  // inside the handler itself (`pages/api/relay/deliveries.ts`) — not by a NextAuth
+  // session. Same reasoning as route-lookup above: the caller is a program, and left
+  // off this list it would 307 to `/auth/login` and n8n would read an HTML page as a
+  // delivery-status answer. Same exact-path-not-wildcard discipline: the query string
+  // carries `requestId` precisely so this stays ONE exact entry and `/api/relay/*` never
+  // has to be opened. Deliberately NOT under `/api/teams/[slug]/`, because the tenant
+  // must come from the token, never from a URL segment. Removing this line is the
+  // documented rollback for the whole feature — the handler is then unreachable.
+  '/api/relay/deliveries',
   '/api/relay/qstash',
   // [RELAY-44] Vercel Cron invokes this with no NextAuth session — only a
   // `CRON_SECRET` bearer token, checked inside the handler itself
