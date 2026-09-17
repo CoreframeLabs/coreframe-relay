@@ -35,13 +35,16 @@ import type { Bindings } from '../types/bindings.js';
  * [RELAY-13] as written says "backed by Cloudflare KV". It is NOT, and this is a
  * deliberate, recorded deviation rather than an oversight:
  *
- *   `RELAY_KV` HAS NEVER BEEN BOUND. The `[[kv_namespaces]]` block in `wrangler.toml` is
- *   commented out because the namespace id has to be issued by `wrangler kv namespace
- *   create`, and no such namespace exists yet. A KV-backed limiter would therefore be
- *   INERT on the deployed Worker — present in the source, green in the unit suite, and
- *   enforcing nothing in production. That is the exact failure shape D7's gate exists to
- *   catch, so shipping it would be worse than shipping no limiter at all: it would be a
- *   limiter that reports itself as done.
+ *   At the time this limiter was written, `RELAY_KV` had never been bound — the
+ *   `[[kv_namespaces]]` block in `wrangler.toml` was commented out because no namespace id
+ *   had been issued yet. [RELAY-126, 2026-09-17: STALE SINCE 2026-08-27 — `wrangler.toml`
+ *   now binds `RELAY_KV` in both `production` and `staging` (RELAY-43 closed that AC and
+ *   proved the cache working live). The reasoning below still holds for WHY this limiter
+ *   is not KV-backed: a limiter whose correctness depends on a binding is a limiter that
+ *   can silently report itself as done.] A KV-backed limiter would have been INERT on the
+ *   deployed Worker — present in the source, green in the unit suite, and enforcing nothing
+ *   in production. That is the exact failure shape D7's gate exists to catch, so shipping
+ *   it would have been worse than shipping no limiter at all.
  *
  * The Workers Rate Limiting binding needs no issued id (the `namespace_id` is chosen by
  * the author), no new npm dependency, and no external service. It is enforced by the
