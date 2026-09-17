@@ -74,6 +74,10 @@ export type AppEvent =
   | 'route.destination_headers_cleared'
   // ── Relay [RELAY-50] — test webhook sent. Audit metadata carries the requestId, not the payload. ──
   | 'route.test_sent'
+  // ── Relay [RELAY-119] — delivery read tokens. Metadata carries the token's id, name,
+  // route and lastFour — never the token, never its hash. See models/readToken.ts. ──
+  | 'relay.read_token.created'
+  | 'relay.read_token.revoked'
   // ── Relay [RELAY-5] — one per terminal state of a delivery attempt ──
   | 'delivery.delivered'
   | 'delivery.retrying'
