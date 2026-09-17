@@ -85,6 +85,11 @@ $$;
 -- Default EXECUTE on functions is granted to PUBLIC; revoke it and re-grant to the one
 -- role that should call this. `authenticated`/`anon` (PostgREST) never get it.
 REVOKE ALL ON FUNCTION relay_read_token_lookup(text) FROM PUBLIC;
+-- Supabase's ALTER DEFAULT PRIVILEGES grants EXECUTE on new public functions to the
+-- PostgREST roles directly; REVOKE FROM PUBLIC does not touch those grants. Found on
+-- production immediately after applying this file (has_function_privilege('anon', ...)
+-- was true) — the RELAY-113 class. Revoked explicitly.
+REVOKE EXECUTE ON FUNCTION relay_read_token_lookup(text) FROM anon, authenticated;
 GRANT EXECUTE ON FUNCTION relay_read_token_lookup(text) TO relay_app;
 
 -- 5. Guard: the function is only a bypass if its owner bypasses RLS. Refuse otherwise.
