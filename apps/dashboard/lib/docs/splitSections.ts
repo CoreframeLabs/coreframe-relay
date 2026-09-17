@@ -63,7 +63,9 @@ export function splitMarkdownSections(markdown: string): {
     const isH2 = !inFence && /^##(?!#)\s+/.test(line);
     if (isH2) {
       flush();
-      currentTitle = line.replace(/^##\s+/, '').trim();
+      // Headings may carry inline code (`FOO=true`); the TOC and section heading
+      // render plain text, so strip the backticks rather than show them literally.
+      currentTitle = line.replace(/^##\s+/, '').replace(/`/g, '').trim();
       currentLines = [];
     } else {
       currentLines.push(line);

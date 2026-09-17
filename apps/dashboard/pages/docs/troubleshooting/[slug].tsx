@@ -38,8 +38,8 @@ type PageProps = {
 
 const buildLastUpdated = (data: TroubleshootingFrontmatter): string =>
   data.n8nVersionVerified
-    ? `Last updated ${data.dateModified} · last verified against n8n ${data.n8nVersionVerified} on ${data.verifiedOn} by ${data.verifiedBy}`
-    : `Last updated ${data.dateModified} · last verified on ${data.verifiedOn} by ${data.verifiedBy}`;
+    ? `${data.dateModified} · last verified against n8n ${data.n8nVersionVerified} on ${data.verifiedOn} by ${data.verifiedBy}`
+    : `${data.dateModified} · last verified on ${data.verifiedOn} by ${data.verifiedBy}`;
 
 const TroubleshootingPage: NextPageWithLayout<PageProps> = ({
   data,

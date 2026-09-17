@@ -25,6 +25,10 @@ point is worse than an empty section.
 - [Quickstart — any webhook sender](https://relay.coreframe-labs.dev/docs/quickstart): Sign up, create a route, get the ingest URL, point any webhook sender at it, then what the delivery log shows and the limits (1 MiB payload cap, 64KB DLQ-replay cap, no SLA) before you rely on it. Markdown mirror: https://relay.coreframe-labs.dev/docs/quickstart.md
 - [Using Relay in front of an n8n webhook](https://relay.coreframe-labs.dev/docs/integrations/n8n): The documented, current n8n Webhook-trigger bugs (silent stop, API-activation not registering the webhook path, the 100-second Cloudflare timeout, a Production Webhook that can return 200 with nothing registered), stated plainly against what Relay does and does not fix for each, plus step-by-step setup. Markdown mirror: https://relay.coreframe-labs.dev/docs/integrations/n8n.md
 
+## Troubleshooting
+
+- [n8n workflow deactivates itself: which bug you have, and the check that tells you](https://relay.coreframe-labs.dev/docs/troubleshooting/n8n-workflow-deactivates-itself): Three known causes by deployment shape: the multi-main activation bug (#27416, changed in n8n 2.17.0), a shared webhook path, or a trigger lost on takeover. Last verified against n8n 2.39.7 on 2026-09-17. Markdown mirror: https://relay.coreframe-labs.dev/docs/troubleshooting/n8n-workflow-deactivates-itself.md
+
 ## Legal
 
 - [Terms of Service](https://relay.coreframe-labs.dev/terms): Includes §3, "What is not guaranteed" — no uptime SLA and at-least-once (not exactly-once) delivery, stated explicitly.
