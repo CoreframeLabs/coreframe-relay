@@ -63,6 +63,18 @@ const bugCapabilityRows: {
       "Relay receives the request first. While n8n's listener is down, the payload sits safely in Relay, gets retried with backoff, and lands in the DLQ (visible, manually replayable) if n8n never answers — instead of vanishing.",
   },
   {
+    bug: 'Multi-main activation failure permanently deactivates a workflow, no audit trail (#27416)',
+    verdict: 'yes',
+    whatHappens:
+      "Same shape as the row above, but harsher: once this fires, the workflow doesn't just go quiet, it's permanently deactivated with no automatic recovery and no audit trail, so nobody notices until someone checks. Relay still receives every request in front of that dead webhook, queues it, retries with backoff, and lands it in the DLQ once retries exhaust — visible and replayable once a human notices and manually reactivates the workflow. Relay doesn't reactivate n8n's workflow or alert anyone that the deactivation happened; it only keeps the events alive until someone does. Fixed in n8n 2.17.0 — if you're not on that version yet in a multi-main queue-mode deployment, this is still live.",
+  },
+  {
+    bug: 'Self-hosted webhook silently stops responding, no root cause found (#11424)',
+    verdict: 'yes',
+    whatHappens:
+      "Same shape as the first row, reported independently on a plain single-instance, self-hosted deployment. n8n closed the issue without ever finding a root cause; the only fix anyone found was deleting and recreating the webhook trigger. Relay in front of the same webhook queues and retries every request during that dead window and holds anything that never gets through in the DLQ, so recreating the trigger doesn't cost you the events that arrived while it was down.",
+  },
+  {
     bug: 'API-activation never registers the webhook path (#21614)',
     verdict: 'no',
     whatHappens:
@@ -176,6 +188,75 @@ const sections: DocsSection[] = [
               GitHub #16339
             </a>
             ).
+          </li>
+        </ul>
+        <p className="mt-4">
+          <strong className="text-landing-primary">
+            Two more citations for the first bug above
+          </strong>{' '}
+          — the community forum thread only describes the symptom; these two
+          GitHub issues document actual instances of it, and were re-read for
+          this page on 2026-09-17:
+        </p>
+        <ul className="mt-3 list-disc space-y-3 pl-5">
+          <li>
+            <strong className="text-landing-primary">
+              <a
+                href="https://github.com/n8n-io/n8n/issues/27416"
+                target="_blank"
+                rel="noopener noreferrer"
+                className={extLink}
+              >
+                GitHub #27416
+              </a>
+            </strong>{' '}
+            is a strictly better-documented root cause for the same
+            &ldquo;workflow deactivates itself&rdquo; symptom than the forum
+            thread above. In multi-main queue-mode deployments, a transient
+            activation failure during startup or a leader takeover makes n8n
+            unconditionally write <code>active: false, activeVersionId: null</code>{' '}
+            to the database — with no retry, no automatic recovery on the
+            next leadership change (<code>getAllActiveIds()</code> excludes a
+            nulled workflow permanently), and no audit trail, and the failure
+            cascades to any parent workflow that calls the deactivated one
+            via an <code>executeWorkflow</code> node. Reported against n8n
+            2.12.0, confirmed independently on 2.13.1.{' '}
+            <strong className="text-landing-primary">
+              Re-read on 2026-09-17: closed, fixed in n8n 2.17.0
+            </strong>{' '}
+            via{' '}
+            <a
+              href="https://github.com/n8n-io/n8n/pull/28110"
+              target="_blank"
+              rel="noopener noreferrer"
+              className={extLink}
+            >
+              PR #28110
+            </a>
+            . If you&rsquo;re not yet on 2.17.0+ and run multi-main queue
+            mode, treat this as still live.
+          </li>
+          <li>
+            <strong className="text-landing-primary">
+              <a
+                href="https://github.com/n8n-io/n8n/issues/11424"
+                target="_blank"
+                rel="noopener noreferrer"
+                className={extLink}
+              >
+                GitHub #11424
+              </a>
+            </strong>{' '}
+            is the same silent-stop shape on a plain single-instance
+            deployment: a self-hosted Slack webhook on Render (n8n 1.64.0,
+            SQLite, regular execution mode) answered fine for days, then
+            stopped responding to Slack&rsquo;s challenge request; deleting
+            and recreating the webhook trigger was the only fix anyone found.{' '}
+            <strong className="text-landing-primary">
+              Re-read on 2026-09-17: closed, but n8n&rsquo;s team never
+              identified a root cause
+            </strong>{' '}
+            — no fix shipped, workaround only.
           </li>
         </ul>
         <p className="mt-4">

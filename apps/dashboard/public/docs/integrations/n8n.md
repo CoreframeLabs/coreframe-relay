@@ -31,6 +31,28 @@ probably hit one of these:
   with nothing actually registered behind it**, on both n8n Cloud and fresh self-hosted
   workflows ([GitHub #16339](https://github.com/n8n-io/n8n/issues/16339)).
 
+**Two more citations for the first bug above** — the community forum thread only
+describes the symptom; these two GitHub issues document actual instances of it, and were
+re-read for this page on 2026-09-17:
+
+- [**GitHub #27416**](https://github.com/n8n-io/n8n/issues/27416) is a strictly
+  better-documented root cause for the same "workflow deactivates itself" symptom than
+  the forum thread above. In multi-main queue-mode deployments, a transient activation
+  failure during startup or a leader takeover makes n8n unconditionally write
+  `active: false, activeVersionId: null` to the database — with no retry, no automatic
+  recovery on the next leadership change (`getAllActiveIds()` excludes a nulled workflow
+  permanently), and no audit trail, and the failure cascades to any parent workflow that
+  calls the deactivated one via an `executeWorkflow` node. Reported against n8n 2.12.0,
+  confirmed independently on 2.13.1. **Re-read on 2026-09-17: closed, fixed in n8n 2.17.0**
+  via [PR #28110](https://github.com/n8n-io/n8n/pull/28110). If you're not yet on 2.17.0+
+  and run multi-main queue mode, treat this as still live.
+- [**GitHub #11424**](https://github.com/n8n-io/n8n/issues/11424) is the same silent-stop
+  shape on a plain single-instance deployment: a self-hosted Slack webhook on Render (n8n
+  1.64.0, SQLite, regular execution mode) answered fine for days, then stopped responding
+  to Slack's challenge request; deleting and recreating the webhook trigger was the only
+  fix anyone found. **Re-read on 2026-09-17: closed, but n8n's team never identified a
+  root cause** — no fix shipped, workaround only.
+
 These bugs live inside n8n's own webhook-handling and activation logic. Relay doesn't
 patch n8n's code and can't reach into n8n's internals — what it changes is what happens
 to your data *while* n8n is having one of these moments, because Relay, not n8n, is the
@@ -48,6 +70,8 @@ not fix:
 | n8n's bug | Does Relay fix it? | What actually happens |
 |---|---|---|
 | Webhooks randomly stop firing, need a manual toggle | **Yes, the consequence.** | Relay receives the request first. While n8n's listener is down, the payload sits safely in Relay, gets retried with backoff, and lands in the DLQ (visible, manually replayable) if n8n never answers — instead of vanishing. |
+| Multi-main activation failure permanently deactivates a workflow, no audit trail (#27416) | **Yes, the consequence — same as the row above.** | This is a harsher version of the same failure: once it fires, the workflow doesn't just go quiet, it's *permanently* deactivated with no automatic recovery and no audit trail, so nobody notices until someone checks. Relay still receives every request in front of that dead webhook, queues it, retries with backoff, and lands it in the DLQ once retries exhaust — visible and replayable once a human notices and manually reactivates the workflow. Relay doesn't reactivate n8n's workflow or alert anyone that the deactivation happened; it only keeps the events alive until someone does. Fixed in n8n 2.17.0 — if you're not on that version yet in a multi-main queue-mode deployment, this is still live. |
+| Self-hosted webhook silently stops responding, no root cause found (#11424) | **Yes, the consequence — same as the row above.** | Same shape, reported independently on a plain single-instance, self-hosted deployment. n8n closed the issue without ever finding a root cause; the only fix anyone found was deleting and recreating the webhook trigger. Relay in front of the same webhook queues and retries every request during that dead window and holds anything that never gets through in the DLQ, so recreating the trigger doesn't cost you the events that arrived while it was down. |
 | API-activation never registers the webhook path (#21614) | **No.** Relay can't register n8n's own listener. | Instead of a silently dead webhook, requests show up in Relay's delivery log as RETRYING → DLQ against a destination that keeps refusing. You get a real, timestamped failure signal instead of nothing. |
 | n8n Cloud's 100-second Cloudflare timeout | **Yes, for the sender's side.** | Relay acknowledges the sender in milliseconds and forwards asynchronously. Stripe/Shopify never see n8n's processing time — they see Relay's ack. Relay's own forward to n8n waits up to 110 seconds before giving up — deliberately just past n8n's documented 100-second ceiling, so a workflow that legitimately takes n8n's full window still gets a real answer instead of being marked failed early. If n8n itself then times out (its own 524) or Relay's 110s forward window elapses first, that attempt becomes a RETRYING/DLQ item Relay keeps retrying, rather than the sender's own delivery attempt failing outright. See the duplicate-delivery note below before you rely on that retry against a slow workflow. |
 | Production webhook always returns 200 OK with nothing registered (#16339) | **No — and this is the sharpest limit.** | If n8n accepts Relay's forwarded request and answers 200 while doing nothing, Relay's delivery log will honestly show DELIVERED, because that's what happened at the HTTP layer. Relay can prove "we handed this to n8n and n8n said OK." It cannot prove n8n's workflow actually ran. |
