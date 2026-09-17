@@ -82,7 +82,10 @@ export const findFirstUserOrThrow = async ({ where }) => {
   return normalizeUser(user);
 };
 
-const isAllowed = (role: Role, resource: Resource, action: Action) => {
+// [RELAY-122] Exported so a handler that needs a yes/no answer WITHOUT throwing (e.g.
+// "should this response redact a secret?") can reuse the same permission table
+// `throwIfNotAllowed` already enforces, instead of re-deriving the rule.
+export const isAllowed = (role: Role, resource: Resource, action: Action) => {
   const rolePermissions = permissions[role];
 
   if (!rolePermissions) {

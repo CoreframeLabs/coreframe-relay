@@ -46,18 +46,25 @@ export function slugifyRouteName(name: string): string {
 }
 
 /**
- * The route fields ANY API or page is allowed to see by default. Everything EXCEPT
- * two columns:
+ * The route fields a `fetchRoutes`/`fetchRoute` caller gets back. `ingestToken` (below)
+ * IS selected here, deliberately — not excluded, whatever an earlier version of this
+ * comment claimed. `relayUrlFor` needs the live token to build the ingest URL
+ * (RELAY-57), and `test-send.ts` needs it to fire a real webhook through the real
+ * endpoint, so this select's job is only to keep `destinationHeadersEncrypted`
+ * (RELAY-59) out of the model layer's return value — that column is decryptable only
+ * at forward time in the qstash consumer, and is NEVER travelled over the wire or into
+ * a model caller's object. `destinationHeadersEncrypted` is not `true` above, so it is
+ * excluded by construction; the caller-side pick a route needing it uses is elsewhere.
  *
- *   - `ingestToken` (RELAY-57) is recoverable only by forming the URL via
- *     `relayUrlFor`, which constructs the path segment on demand and never lets the
- *     token live as a plain fetched value
- *   - `destinationHeadersEncrypted` (RELAY-59) is decryptable only at forward time in
- *     the qstash consumer, and is NEVER travelled over the wire or into a model
- *     caller's object
- *
- * A route that needs those two names them via a dedicated pick, so the compiler makes
- * narrowing an explicit act.
+ * `ingestToken` is NOT secret by the time it leaves this function — masking it for a
+ * caller who should not see it is the RESPONSE handler's job, not this select's.
+ * [RELAY-122] `GET /api/teams/:slug/relay/routes` is the one caller that has to make
+ * that call: it redacts the token (and the token segment inside the `relayUrl` this
+ * function's sibling `relayUrlFor` builds) for anyone who lacks `team:update`, in
+ * `pages/api/teams/[slug]/relay/routes/index.ts`'s `handleGET`. Narrowing what a
+ * caller sees at the query layer would mean two different route-shaped types for
+ * "can reveal" vs "cannot" — the simpler invariant this codebase actually keeps is
+ * "the model layer returns the real row; the API layer decides who is shown it."
  */
 export const PUBLIC_ROUTE_SELECT = {
   id: true,

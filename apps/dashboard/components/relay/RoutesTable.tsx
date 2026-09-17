@@ -25,9 +25,16 @@ import { CopyableUrl } from './CopyableUrl';
 import { SendTestButton } from './SendTestButton';
 import { EditDestinationDialog } from './EditDestinationDialog';
 import { cn } from '@/lib/utils';
+import useCanAccess from 'hooks/useCanAccess';
 
-/** A Route as the API returns it — the model plus its derived public URL. */
-export type RouteRow = Route & { relayUrl: string };
+/**
+ * A Route as the API returns it — the model plus its derived public URL.
+ * [RELAY-122] `ingestUrlRedacted` mirrors the API's own `reveal` decision
+ * (`pages/api/teams/[slug]/relay/routes/index.ts`'s `handleGET`): true when the
+ * caller lacks `team:update` and `relayUrl`'s token segment is therefore a
+ * placeholder, not a live credential.
+ */
+export type RouteRow = Route & { relayUrl: string; ingestUrlRedacted?: boolean };
 
 const columnHelper = createColumnHelper<RouteRow>();
 
@@ -81,6 +88,14 @@ export function RoutesTable({
   const [sorting, setSorting] = useState<SortingState>([{ id: 'createdAt', desc: true }]);
   const { t } = useTranslation('common');
   const [search, setSearch] = useState('');
+  // [RELAY-122] Same gate the API enforces server-side (`team:update`) — reveal, copy,
+  // and rotate all act on (or expose) the live ingest credential, so a caller who
+  // cannot mint/rotate a route should not see controls implying they can inspect its
+  // token either. The server has already redacted the value for these callers; this
+  // hides the now-meaningless buttons rather than leaving a copy button that copies a
+  // placeholder.
+  const { canAccess } = useCanAccess();
+  const canManageIngestToken = canAccess('team', ['update']);
 
   // ── [RELAY-57] reveal / copy / rotate, per row. ────────────────────────────────────
   // The token lives in every string here and nowhere else: `relayUrl` is the only place
@@ -168,6 +183,24 @@ export function RoutesTable({
           const revealed = revealedIds.has(route.id);
           const rotating = rotatingId === route.id;
           const copied = copiedId === route.id;
+
+          // [RELAY-122] The server has already redacted `relayUrl`'s token segment for
+          // this caller (`route.ingestUrlRedacted`), and this caller lacks the
+          // `team:update` permission the reveal/copy/rotate actions require anyway
+          // (`canManageIngestToken`). Either signal alone is enough to fall back to a
+          // plain, non-interactive masked span — no reveal toggle offering to unmask a
+          // value that is already a placeholder, no copy button that would copy that
+          // placeholder, no rotate button for a credential this caller cannot manage.
+          if (!canManageIngestToken || route.ingestUrlRedacted) {
+            return (
+              <span
+                className="block max-w-[22rem] truncate font-mono text-xs text-muted-foreground"
+                title="Only team admins and owners can view or manage the ingest URL"
+              >
+                {maskUrl(url)}
+              </span>
+            );
+          }
 
           return (
             <div className="flex min-w-0 max-w-[22rem] items-center gap-1.5">
@@ -271,7 +304,7 @@ export function RoutesTable({
     // `revealedIds`/`rotatingId`/`copiedId` from closure, and a memo that ignored them
     // would leave a revealed token visible — or a spinner frozen — after the state moved.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [revealedIds, rotatingId, copiedId, teamSlug, onRotated]
+    [revealedIds, rotatingId, copiedId, teamSlug, onRotated, canManageIngestToken]
   );
 
   /**
