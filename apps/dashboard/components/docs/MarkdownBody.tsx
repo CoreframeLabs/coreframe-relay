@@ -15,7 +15,6 @@
  * block) and already re-theme on their own — no `dark:` variants needed here,
  * same as every other docs page.
  */
-import Link from 'next/link';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import type { ReactNode } from 'react';
@@ -52,23 +51,20 @@ export function MarkdownBody({ markdown }: { markdown: string }) {
           ),
           li: ({ children }) => <li className="text-landing-secondary">{children}</li>,
           a: ({ href, children }) => {
+            // A plain <a>, not next/link, for both branches: internal docs links
+            // don't need client-side prefetching badly enough to be worth the
+            // `next/link` children-type friction against react-markdown's own
+            // node types, and every other inline link on this page family
+            // (n8n.tsx's `extLink`) is a plain <a> too.
             const isExternal = /^https?:\/\//.test(href ?? '');
-            if (isExternal) {
-              return (
-                <a
-                  href={href}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className={extLink}
-                >
-                  {children}
-                </a>
-              );
-            }
             return (
-              <Link href={href ?? '#'} className={inlineLink}>
+              <a
+                href={href}
+                {...(isExternal ? { target: '_blank', rel: 'noopener noreferrer' } : {})}
+                className={isExternal ? extLink : inlineLink}
+              >
                 {children}
-              </Link>
+              </a>
             );
           },
           table: ({ children }) => (

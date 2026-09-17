@@ -61,13 +61,13 @@ export type TroubleshootingPage = {
   content: string;
 };
 
-// Every field required unless it's in this list, per the spec's frontmatter
-// block ("all fields required unless marked optional"). `n8nVersionVerified` is
-// spec'd as "omit only for non-n8n pages" — there is no separate frontmatter flag
-// for "this is an n8n page" to gate that on, so this uses the same signal the URL
-// pattern itself uses (every n8n example slug in the spec is prefixed `n8n-`) and
-// documents that heuristic here rather than silently guessing.
-const OPTIONAL_FIELDS = new Set(['relatedTroubleshooting']);
+// Every field is required except `relatedTroubleshooting` (spec: "optional;
+// slugs of sibling pages"), which is simply never listed below. `n8nVersionVerified`
+// is spec'd as "omit only for non-n8n pages" — there is no separate frontmatter
+// flag for "this is an n8n page" to gate that on, so `assertFrontmatter` below
+// uses the same signal the URL pattern itself uses (every n8n example slug in the
+// spec is prefixed `n8n-`) and documents that heuristic there rather than
+// silently guessing.
 const REQUIRED_FIELDS: (keyof TroubleshootingFrontmatter)[] = [
   'title',
   'metaTitle',
@@ -140,6 +140,19 @@ export function getPage(slug: string): TroubleshootingPage {
   const filePath = join(TROUBLESHOOTING_DIR, `${slug}.md`);
   const raw = readFileSync(filePath, 'utf8');
   const { data, content } = matter(raw);
+
+  // gray-matter's YAML parser (js-yaml) auto-casts an unquoted `key: 2026-10-13`
+  // value to a JS `Date`, which `getStaticProps` then can't JSON-serialize
+  // ("[object Date] cannot be serialized") — hit for real running this exact
+  // build against the fixture below. The frontmatter spec's own dates are
+  // deliberately unquoted (`datePublished: 2026-10-13`), so this normalizes
+  // rather than requiring every author to remember to quote three fields.
+  for (const field of ['datePublished', 'dateModified', 'verifiedOn'] as const) {
+    const value = data[field];
+    if (value instanceof Date) {
+      data[field] = value.toISOString().slice(0, 10);
+    }
+  }
 
   assertFrontmatter(data, filePath);
 
