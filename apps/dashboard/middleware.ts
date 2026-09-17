@@ -167,6 +167,33 @@ const unAuthenticatedRoutes = [
   '/llms.txt',
   '/docs/quickstart.md',
   '/docs/integrations/n8n.md',
+  // [RELAY-163] `docs/troubleshooting/*.md` mirrors, same failure mode as the two
+  // entries above. DEVIATES from this list's own named discipline ("Named
+  // exactly, not by wildcard, same discipline as the rest of this list") on
+  // purpose, flagged here rather than silently: the spec
+  // (growth/content/relay-seo-content-location-decision-2026-09-17.md,
+  // "Exact middleware.ts entries") shows one hand-added exact line per page,
+  // the same as quickstart.md/n8n.md above. But RELAY-163's entire point is
+  // that a later page (RELAY-149 onward) is "a Markdown file drop, not a JSX
+  // transcription" — `scripts/sync-doc-mirrors.mjs` and
+  // `pages/docs/troubleshooting/[slug].tsx` already pick up a new file with no
+  // other edit required, and a per-file exact entry here would be the one place
+  // left that still needed a manual middleware.ts change per page, silently
+  // 307ing a brand-new page's `.md` mirror to `/auth/login` until someone
+  // remembered to add it (exactly the bug class RELAY-80/81/145 already hit).
+  // A single, narrow, one-level pattern closes that gap without going as wide as
+  // `/docs/troubleshooting/**` would (`*` cannot cross a `/`, so this cannot
+  // match anything nested, and it only matches `.md`, not the HTML route, which
+  // `/docs/**` already covers): verified with
+  // `micromatch.isMatch('/docs/troubleshooting/n8n-workflow-deactivates-itself.md',
+  // '/docs/troubleshooting/*.md')` → true, and
+  // `micromatch.isMatch('/docs/troubleshooting/x/y.md', '/docs/troubleshooting/*.md')`
+  // → false. There are zero real files under `docs/troubleshooting/` as this
+  // lands (RELAY-149 is being drafted in parallel), so this entry currently
+  // matches nothing live; curled anonymously against this worktree's own build
+  // using the throwaway fixture before it was deleted (see the commit that
+  // added and then removed it) to prove the pattern actually resolves.
+  '/docs/troubleshooting/*.md',
   // [RELAY-129 regression fix, same-day] Adding an explicit '/' matcher entry
   // (above) made middleware run on the landing page for the first time ever —
   // previously it was public only by accident (the i18n-forced matcher regex

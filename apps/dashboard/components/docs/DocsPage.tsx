@@ -119,6 +119,15 @@ type DocsPageProps = {
   /** Absolute, self-referencing canonical URL — [seo-foundation 2026-09-15],
    * same reasoning as `LegalPage`'s `canonical` prop. */
   canonical: string;
+  /**
+   * [RELAY-163] Optional structured-data payload, emitted as a single
+   * `<script type="application/ld+json">`. Additive-only — the spec
+   * (`growth/content/relay-seo-content-location-decision-2026-09-17.md`,
+   * "Source of truth and rendering") permits exactly this one extra prop on
+   * `DocsPage` for the Markdown-sourced troubleshooting route's `TechArticle`
+   * JSON-LD; no other prop or existing page's markup changes.
+   */
+  jsonLd?: Record<string, unknown>;
 };
 
 const DocsPage = ({
@@ -131,6 +140,7 @@ const DocsPage = ({
   metaDescription,
   afterIntro,
   canonical,
+  jsonLd,
 }: DocsPageProps) => {
   return (
     <>
@@ -138,6 +148,12 @@ const DocsPage = ({
         <title>{metaTitle}</title>
         <meta name="description" content={metaDescription} />
         <link rel="canonical" href={canonical} />
+        {jsonLd ? (
+          <script
+            type="application/ld+json"
+            dangerouslySetInnerHTML={{ __html: JSON.stringify(jsonLd) }}
+          />
+        ) : null}
       </Head>
 
       <div className="min-h-screen bg-landing-base text-landing-secondary antialiased">
