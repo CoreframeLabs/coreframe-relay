@@ -147,6 +147,7 @@ model Team {
   gateRules        GateRule[]
   approvalRequests ApprovalRequest[]
   auditLogs        AuditLog[]
+  readTokens       RelayReadToken[]
 
   @@index([billingId])
 }
@@ -356,6 +357,7 @@ model Route {
   team         Team          @relation(fields: [teamId], references: [id], onDelete: Cascade)
   deliveryLogs DeliveryLog[]
   dlqItems     DlqItem[]
+  readTokens   RelayReadToken[]
 
   // The unique constraint already indexes (teamId, slug), which covers the
   // "list routes for a team" query by leftmost prefix. A bare @@index([teamId])
@@ -522,4 +524,60 @@ model AuditLog {
 
   @@index([teamId, createdAt(sort: Desc)])
   @@index([teamId, event, createdAt(sort: Desc)])
+}
+
+/// [RELAY-119] A scoped, route-pinned, read-only machine credential — the primitive
+/// `growth/product/relay-119-121-122-decision-2026-09-17.md` §1 picked (Option B of
+/// `relay-119-auth-decision.md`). Presented as `Authorization: Bearer relay_rt_…` to
+/// `GET /api/relay/deliveries?requestId=`, and nothing else in v1.
+///
+/// What it is NOT: not `ApiKey` (which carries no user, no role, no scope, and has no
+/// caller), and not the route's `ingestToken` (a WRITE capability that travels in a URL
+/// and is already spread through n8n workflow exports — reusing it would retroactively
+/// turn every leaked ingest URL into a read credential).
+///
+/// `hashedToken` is the unsalted SHA-256 hex of the full `relay_rt_…` string, same as
+/// `ApiKey.hashedKey` and `ingestTokenDigestHex` — correct for a 192-bit random secret
+/// (no dictionary exists to attack), and it lets the lookup be one indexed equality.
+/// The plain token is never stored; `prefix`/`lastFour` exist so a list view can show
+/// "relay_rt_…Ab3x" without recovering anything.
+///
+/// `routeId` is NON-NULL in v1 — the pin is structural, not a filter the read handler
+/// remembers to apply. RELAY-DRAFT-7 may relax it; that is its decision, not this one.
+///
+/// `scopes` is fixed to `['delivery:read']` by the writer; the column exists so the
+/// public-API primitive is chosen once (RELAY-DRAFT-2's stated requirement).
+///
+/// `createdByUserId` is a plain string, deliberately NOT a foreign key: the token belongs
+/// to the team, not to the person who minted it. An ADMIN contractor leaving must not
+/// silently kill the customer's n8n workflow — OWNER revokes explicitly, and the audit
+/// row (`relay.read_token.created`) already records who minted it.
+///
+/// Revocation is soft (`revokedAt`), so rotation is mint-new-then-revoke-old and two
+/// tokens can coexist while an operator updates a credential store by hand.
+///
+/// RLS: `supabase/migrations/20260917120000_relay_119_read_token_rls.sql` — same
+/// `app.current_team_id` policy as the other Relay tables, plus ONE definer-rights
+/// lookup function that is the only unscoped read path (an equality on the hash).
+model RelayReadToken {
+  id              String    @id @default(uuid())
+  teamId          String
+  routeId         String
+  name            String
+  hashedToken     String    @unique
+  prefix          String
+  lastFour        String
+  scopes          String[]
+  expiresAt       DateTime  @db.Timestamptz(6)
+  lastUsedAt      DateTime? @db.Timestamptz(6)
+  revokedAt       DateTime? @db.Timestamptz(6)
+  createdByUserId String
+  createdAt       DateTime  @default(now()) @db.Timestamptz(6)
+
+  team  Team  @relation(fields: [teamId], references: [id], onDelete: Cascade)
+  route Route @relation(fields: [routeId], references: [id], onDelete: Cascade)
+
+  /// Serves the list view: one route's tokens, newest first. `teamId` is leftmost so
+  /// the RLS policy's own predicate is index-assisted too.
+  @@index([teamId, routeId, createdAt(sort: Desc)])
 }
