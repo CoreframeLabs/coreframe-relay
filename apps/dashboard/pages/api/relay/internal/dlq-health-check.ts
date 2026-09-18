@@ -8,7 +8,11 @@ import {
   evaluateDlqHealth,
   DLQ_GROWTH_ALERT_THRESHOLD,
 } from '@/lib/relay/dlqHealthCheck';
-import { notifyDlqGrowthThreshold } from '@/lib/relay/dlqNotify';
+import {
+  notifyDlqGrowthThreshold,
+  getDlqNotifySendFailureCount,
+  formatDlqNotifySendFailureAlert,
+} from '@/lib/relay/dlqNotify';
 
 /**
  * GET /api/relay/internal/dlq-health-check   — [RELAY-44]
@@ -49,6 +53,20 @@ import { notifyDlqGrowthThreshold } from '@/lib/relay/dlqNotify';
  * global ones. Known limitation, acceptable at current scale: this is one query set
  * per route per invocation (no batching), same N+1 shape RELAY-44 accepted for the
  * global case being turned into N cases here.
+ *
+ * SWALLOWED DLQ NOTIFICATION SENDS ALSO PAGE HERE [RELAY-164]
+ * -------------------------------------------------------------
+ * `notifyDlqFallback` and `notifyDlqGrowthThreshold` (`lib/relay/dlqNotify.ts`) both
+ * deliberately swallow every send error so a notification failure never turns a
+ * successful DLQ write, or this cron's 200, into a retry-triggering failure — see that
+ * file's module docs. That correctly-swallowed failure was previously invisible: no
+ * metric, no log line, nothing this health check would ever catch. `dlqNotify.ts` now
+ * keeps a best-effort, in-process count of those swallows (`getDlqNotifySendFailureCount`
+ * — see its doc for why a module-level counter, not a DB query, and its honesty limit on
+ * a serverless runtime); this handler reads it and pages, independently of the
+ * `result.healthy`/per-route checks above, whenever that count is non-zero for the
+ * trailing window. `formatDlqNotifySendFailureAlert` is a pure function purely so the
+ * alert TEXT is testable without mocking Prisma/Sentry/this route.
  *
  * SENTRY SEVERITY — FLAGGED, NOT PROVEN
  * ----------------------------------------
@@ -136,6 +154,17 @@ export default async function handler(
       (settled) => settled.status === 'fulfilled' && settled.value.notified
     ).length;
 
+    // [RELAY-164] See module doc above — independent of `result.healthy`, since a
+    // burst of swallowed notification sends (e.g. Resend's cap hit) is worth paging
+    // on even when DLQ growth and delivery failure ratio both look fine.
+    const swallowedSendFailureCount = getDlqNotifySendFailureCount();
+    const swallowedSendFailureAlert = formatDlqNotifySendFailureAlert(
+      swallowedSendFailureCount
+    );
+    if (swallowedSendFailureAlert) {
+      Sentry.captureMessage(swallowedSendFailureAlert, { level: 'error' });
+    }
+
     res.setHeader('Cache-Control', 'no-store');
     return res.status(200).json({
       healthy: result.healthy,
@@ -144,6 +173,7 @@ export default async function handler(
       failureRatio: result.failureRatio,
       routesChecked: routes.length,
       routesNotified,
+      swallowedSendFailureCount,
     });
   } catch (error) {
     console.error('[relay] dlq-health-check failed', {
