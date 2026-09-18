@@ -81,7 +81,13 @@ export type AppEvent =
   // ── Relay [RELAY-5] — one per terminal state of a delivery attempt ──
   | 'delivery.delivered'
   | 'delivery.retrying'
-  | 'delivery.dlq';
+  | 'delivery.dlq'
+  // ── Relay [RELAY-164] — a DLQ notification (email or Slack) failed to send and
+  // was swallowed by `lib/relay/dlqNotify.ts` on purpose (see that file's module
+  // docs for why a notify failure must never fail the DLQ write it's reporting on).
+  // One metric name for both channels; `channel` and `reason` live in the
+  // structured `console.error` line emitted alongside it, not in the metric name. ──
+  | 'relay.dlq_notify.send_failed';
 
 export type AUTH_PROVIDER =
   | 'github'

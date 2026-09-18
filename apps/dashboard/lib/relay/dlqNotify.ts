@@ -6,6 +6,7 @@ import { sendDlqFallbackEmail } from '@/lib/email/sendDlqFallbackEmail';
 import { unscopedPrisma } from '@/lib/prisma';
 import env from '@/lib/env';
 import app from '@/lib/app';
+import { recordMetric } from '@/lib/metrics';
 import {
   evaluateDlqHealth,
   DLQ_HEALTH_WINDOW_MS,
@@ -13,6 +14,104 @@ import {
   type DlqHealthMetrics,
   type DlqHealthAlertReason,
 } from '@/lib/relay/dlqHealthCheck';
+
+/**
+ * [RELAY-164] "DLQ fallback email failures are swallowed silently" — this block is the
+ * fix. `notifyDlqFallback` and `notifyDlqGrowthThreshold` below both deliberately
+ * swallow every send error (see each function's module doc for why: a failed
+ * notification must never turn a successful DLQ write, or a healthy cron tick, into a
+ * retry-triggering failure). That swallow is correct and UNCHANGED by this ticket — the
+ * problem was that it left NO trace anywhere once Resend's free-tier cap is hit: no
+ * metric, no log line the founder alert would catch, no way to tell "notifications are
+ * fine" from "notifications have been silently failing for a day." This helper is called
+ * from every swallow site, right before the error is discarded, to leave that trace.
+ *
+ * WHY A MODULE-LEVEL COUNTER, NOT JUST `recordMetric`
+ * -----------------------------------------------------
+ * `recordMetric` (lib/metrics.ts) only emits to the OTEL collector when
+ * `OTEL_EXPORTER_OTLP_METRICS_*` env vars are configured, and even when it is, nothing
+ * in this codebase queries back OUT of that exporter — `dlq-health-check.ts`'s cron
+ * handler has no OTLP query client and this ticket does not add one. There is also no
+ * new table to add: RELAY-164's AC asks the founder health check to "count swallowed
+ * sends in its window," not to ship a migration. A module-level counter, read back via
+ * `getDlqNotifySendFailureCount` below, is the smallest honest thing that satisfies that
+ * AC without inventing infrastructure this ticket doesn't own.
+ *
+ * Its honesty limit, stated plainly rather than hidden: on Vercel, the hot delivery path
+ * that calls `notifyDlqFallback` and the once-a-day `dlq-health-check` cron
+ * (`notifyDlqGrowthThreshold`'s caller) are not guaranteed to share a warm Lambda
+ * instance, so a failure recorded in one invocation's memory can be gone (process
+ * recycled) before the health check ever reads it. That gap is real and NOT swept under
+ * the rug here. The durable, queryable record of every failure is the `recordMetric` +
+ * structured `console.error` line emitted at the same call site — this counter is a
+ * best-effort supplementary signal for the founder alert, not the source of truth.
+ */
+const dlqNotifySendFailureTimestamps: number[] = [];
+
+/**
+ * Records one swallowed send: the in-process counter (for the founder alert, see above)
+ * plus the durable metric + structured log line the RELAY-164 AC actually requires.
+ * Wrapped so that observing a swallow can never itself become a reason the swallow turns
+ * into a throw — this function exists to make failures visible, not to add a new way for
+ * this already-defensive code path to blow up.
+ */
+function recordSwallowedDlqNotifySend(params: {
+  teamId: string;
+  channel: 'email' | 'slack';
+  reason: string;
+}): void {
+  try {
+    dlqNotifySendFailureTimestamps.push(Date.now());
+    recordMetric('relay.dlq_notify.send_failed');
+    console.error(
+      JSON.stringify({
+        level: 'error',
+        event: 'relay.dlq_notify_send_failed',
+        teamId: params.teamId,
+        channel: params.channel,
+        reason: params.reason,
+      })
+    );
+  } catch {
+    // Deliberately empty — see the function doc above. Never let the act of recording
+    // a swallowed failure produce a second, unswallowed one.
+  }
+}
+
+/**
+ * Read side of the counter above. Prunes entries older than `windowMs` (default: the
+ * same trailing window `dlqHealthCheck.ts` already uses) so the array can't grow
+ * unbounded across a long-lived process, then returns how many failures remain in
+ * that window. Exported for `dlq-health-check.ts` (RELAY-44's founder alert) and for
+ * direct, DB-independent testing.
+ */
+export function getDlqNotifySendFailureCount(
+  windowMs: number = DLQ_HEALTH_WINDOW_MS
+): number {
+  const since = Date.now() - windowMs;
+  while (
+    dlqNotifySendFailureTimestamps.length > 0 &&
+    dlqNotifySendFailureTimestamps[0] < since
+  ) {
+    dlqNotifySendFailureTimestamps.shift();
+  }
+  return dlqNotifySendFailureTimestamps.length;
+}
+
+/**
+ * Pure formatting for the founder alert text — kept separate from the Sentry call in
+ * `dlq-health-check.ts` so "does the alert text mention the count" is testable without
+ * mocking Prisma, Sentry, or the API route, the same split `evaluateDlqHealth` uses in
+ * `dlqHealthCheck.ts`. Returns null when there is nothing to say.
+ */
+export function formatDlqNotifySendFailureAlert(count: number): string | null {
+  if (count <= 0) return null;
+  return (
+    `[RELAY-164] ${count} DLQ notification send(s) failed and were swallowed in the ` +
+    `last hour. See 'relay.dlq_notify_send_failed' log lines for the team, channel, ` +
+    `and reason of each.`
+  );
+}
 
 export type DlqFallbackParams = {
   teamId: string;
@@ -86,14 +185,26 @@ export async function notifyDlqFallback(
     // function never even fetches that column. `DestinationUrlSchema` should already
     // rule out an unparseable value at create time; `hostOnly` falls back to the raw
     // string in that case rather than throwing.
-    await sendDlqFallbackEmail({
-      to: ownerEmail,
-      teamSlug: team.slug,
-      teamName: team.name,
-      routeName: route.name,
-      destinationHost: hostOnly(route.destination),
-      failReason,
-    });
+    try {
+      await sendDlqFallbackEmail({
+        to: ownerEmail,
+        teamSlug: team.slug,
+        teamName: team.name,
+        routeName: route.name,
+        destinationHost: hostOnly(route.destination),
+        failReason,
+      });
+    } catch (error) {
+      // [RELAY-164] Record the swallow BEFORE it's swallowed, then rethrow so the
+      // outer catch below still does exactly what it did before this ticket — this
+      // block adds visibility, it does not change the swallow itself.
+      recordSwallowedDlqNotifySend({
+        teamId,
+        channel: 'email',
+        reason: error instanceof Error ? error.message : 'unknown',
+      });
+      throw error;
+    }
   } catch (error) {
     console.error('[relay] dlqNotify: failed to send DLQ fallback email', {
       requestId,
@@ -224,16 +335,27 @@ export async function notifyDlqGrowthThreshold(params: {
 
     if (team.slackWebhookUrl) {
       const slack = SlackNotify(team.slackWebhookUrl);
-      await slack.alert({
-        text: `${app.name}: DLQ growth threshold crossed on "${route.name}"`,
-        fields: {
-          Team: team.name,
-          Route: route.name,
-          'New DLQ items (last hour)': String(metrics.newDlqCount),
-          Threshold: String(DLQ_GROWTH_ALERT_THRESHOLD),
-          Link: dlqLink,
-        },
-      });
+      try {
+        await slack.alert({
+          text: `${app.name}: DLQ growth threshold crossed on "${route.name}"`,
+          fields: {
+            Team: team.name,
+            Route: route.name,
+            'New DLQ items (last hour)': String(metrics.newDlqCount),
+            Threshold: String(DLQ_GROWTH_ALERT_THRESHOLD),
+            Link: dlqLink,
+          },
+        });
+      } catch (error) {
+        // [RELAY-164] Same record-then-rethrow shape as `notifyDlqFallback` above —
+        // the outer catch still swallows this exactly as it did before.
+        recordSwallowedDlqNotifySend({
+          teamId,
+          channel: 'slack',
+          reason: error instanceof Error ? error.message : 'unknown',
+        });
+        throw error;
+      }
       return { notified: true, channel: 'slack', reasons: result.reasons };
     }
 
@@ -246,16 +368,27 @@ export async function notifyDlqGrowthThreshold(params: {
       return { notified: false, channel: null, reasons: result.reasons };
     }
 
-    await sendDlqFallbackEmail({
-      to: ownerEmail,
-      teamSlug: team.slug,
-      teamName: team.name,
-      routeName: route.name,
-      destinationHost: hostOnly(route.destination),
-      failReason:
-        `DLQ growth exceeded threshold: ${metrics.newDlqCount} new dead-lettered ` +
-        `items in the last hour (threshold ${DLQ_GROWTH_ALERT_THRESHOLD}).`,
-    });
+    try {
+      await sendDlqFallbackEmail({
+        to: ownerEmail,
+        teamSlug: team.slug,
+        teamName: team.name,
+        routeName: route.name,
+        destinationHost: hostOnly(route.destination),
+        failReason:
+          `DLQ growth exceeded threshold: ${metrics.newDlqCount} new dead-lettered ` +
+          `items in the last hour (threshold ${DLQ_GROWTH_ALERT_THRESHOLD}).`,
+      });
+    } catch (error) {
+      // [RELAY-164] Same record-then-rethrow shape as `notifyDlqFallback` above — the
+      // outer catch still swallows this exactly as it did before.
+      recordSwallowedDlqNotifySend({
+        teamId,
+        channel: 'email',
+        reason: error instanceof Error ? error.message : 'unknown',
+      });
+      throw error;
+    }
 
     return { notified: true, channel: 'email', reasons: result.reasons };
   } catch (error) {
