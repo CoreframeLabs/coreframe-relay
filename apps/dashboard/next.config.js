@@ -9,6 +9,41 @@ const nextConfig = {
   // is exactly the drift the package exists to prevent. Next must therefore compile it.
   transpilePackages: ['@coreframe-relay/types'],
 
+  // RELAY-167 — Vercel runtime crashed with
+  // "Cannot find module '.../.next/server/pages/500.js'" when an API route
+  // threw at module load and Next tried to fall back to the custom error page.
+  //
+  // Root cause: Next's own error-rendering fallback (render500/_error) requires
+  // pages/500.js, pages/_error.js and _app/_document at runtime, but nothing in
+  // an API route's *source* imports them, so @vercel/nft's static trace for
+  // each route lambda never picks them up — confirmed locally by inspecting
+  // .next/server/pages/api/**/*.nft.json after a build, which lists none of
+  // pages/{404,500,_error,_app,_document}.js. The same gap exists for every
+  // dynamic (SSR) page lambda, not just API routes, since neither the trace
+  // includes them either. i18n (next-i18next.config.js) doesn't relocate these
+  // pages — pages-manifest.json still maps them at /500, /404, /_error, not
+  // locale-prefixed — so that's not the cause, just a red herring worth ruling
+  // out.
+  //
+  // Fix: explicitly add the error-page bundles and their shared runtime chunks
+  // to every route's trace. Globbing the whole chunks/ dir (not the numeric
+  // chunk filenames 500.js currently happens to need) avoids hard-coding
+  // webpack's content-hashed chunk ids, which can renumber on unrelated
+  // changes; Vercel's Next.js builder dedupes identical files shared across
+  // functions, so this doesn't multiply deploy size per-lambda.
+  // https://nextjs.org/docs/pages/api-reference/config/next-config-js/output#caveats
+  outputFileTracingIncludes: {
+    '/**': [
+      './.next/server/pages/_app.js',
+      './.next/server/pages/_document.js',
+      './.next/server/pages/404.js',
+      './.next/server/pages/500.js',
+      './.next/server/pages/_error.js',
+      './.next/server/chunks/**/*.js',
+      './.next/server/webpack-runtime.js',
+    ],
+  },
+
   reactStrictMode: true,
   images: {
     remotePatterns: [
