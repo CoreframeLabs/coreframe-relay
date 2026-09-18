@@ -28,6 +28,7 @@ point is worse than an empty section.
 ## Troubleshooting
 
 - [n8n workflow deactivates itself: which bug you have, and the check that tells you](https://relay.coreframe-labs.dev/docs/troubleshooting/n8n-workflow-deactivates-itself): Three known causes by deployment shape: the multi-main activation bug (#27416, changed in n8n 2.17.0), a shared webhook path, or a trigger lost on takeover. Last verified against n8n 2.39.7 on 2026-09-17. Markdown mirror: https://relay.coreframe-labs.dev/docs/troubleshooting/n8n-workflow-deactivates-itself.md
+- [n8n webhook 524 timeout: the 100-second ceiling, and which of the three fixes to use](https://relay.coreframe-labs.dev/docs/troubleshooting/n8n-webhook-524-timeout): n8n Cloud cuts a webhook response at 100 seconds with a 524, but the execution keeps running. Respond Immediately, two webhooks, or an ack in front: compared. Last verified against n8n 2.39.8 on 2026-09-18. Markdown mirror: https://relay.coreframe-labs.dev/docs/troubleshooting/n8n-webhook-524-timeout.md
 
 ## Legal
 

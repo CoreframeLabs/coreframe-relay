@@ -28,4 +28,5 @@
     <loc>https://relay.coreframe-labs.dev/dpa</loc>
   </url>
   <url><loc>https://relay.coreframe-labs.dev/docs/troubleshooting/n8n-workflow-deactivates-itself</loc></url>
+  <url><loc>https://relay.coreframe-labs.dev/docs/troubleshooting/n8n-webhook-524-timeout</loc></url>
 </urlset>
